@@ -187,10 +187,14 @@ describe("cli", () => {
     expect(text).not.toMatch(/at .*\.ts:\d+/);
   });
 
-  it("mcp prints a not-yet-available message and exits nonzero", async () => {
-    const { err, exitCode } = await runCli(["mcp"]);
-    expect(exitCode).toBe(1);
-    expect(err.join("\n")).toMatch(/next task/i);
+  it("mcp command exists and no longer errors with the stub message", async () => {
+    const program = buildProgram();
+    const mcpCmd = program.commands.find((c) => c.name() === "mcp");
+    expect(mcpCmd).toBeDefined();
+    // The real server behavior (tool registration, stdio transport) is
+    // covered by test/mcp.test.ts via InMemoryTransport; here we only
+    // assert the Task 7 stub is gone.
+    expect(mcpCmd!.description()).not.toMatch(/next task/i);
   });
 
   it("run on a missing plan file prints error: to stderr and exits nonzero, never a raw stack", async () => {

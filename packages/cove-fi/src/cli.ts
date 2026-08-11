@@ -302,9 +302,11 @@ export function buildProgram(io: Io = defaultIo): Command {
   program
     .command("mcp")
     .description("Start the MCP stdio server")
-    .action(() => {
-      console.error("mcp server arrives in the next task");
-      process.exitCode = 1;
+    .action(async () => {
+      // Dynamic import keeps the MCP SDK out of the CLI's normal startup
+      // path (`init`/`run`/`scenario`/`compare`/`check` never need it).
+      const { runStdio } = await import("./mcp/server.js");
+      await runStdio();
     });
 
   return program;
