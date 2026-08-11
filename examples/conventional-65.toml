@@ -1,0 +1,106 @@
+# Cove FI example: "conventional-65"
+#
+# A household following the traditional playbook: max the 401(k) match,
+# contribute to the IRS limit, keep a modest taxable brokerage on the side,
+# own a modest mortgaged home, and retire at 65 on Social Security + savings.
+# No aggressive savings rate, no early retirement — this is the baseline
+# "normal" plan the other two examples (early-52, coastfire) contrast with.
+#
+# Household: born 1985, retiring in 2050 at age 65. Social Security is
+# claimed later, in 2052 (full retirement age), so the plan bridges those
+# two years from savings — a common "retire before you claim" pattern.
+#
+# Things to try changing:
+#   - assumptions.retirement_year: push it later and watch fi_year move
+#     earlier relative to it (more working years to compound).
+#   - contributions[0].employer_match_pct: the free money from an employer
+#     match compounds for decades — small changes here move terminal net
+#     worth a lot.
+#   - expenses[0].amount: lower "living" and fi_year arrives sooner, since
+#     the FI target (25x expenses) shrinks along with it.
+
+[plan]
+birth_year = 1985
+
+[[accounts]]
+name = "cash"
+tax = "cash"
+balance = 25000
+
+[[accounts]]
+name = "brokerage"
+tax = "taxable"
+balance = 60000
+basis = 30000 # half of the balance is unrealized gains
+
+[[accounts]]
+name = "401k"
+tax = "trad"
+balance = 280000
+rmd = true # traditional accounts are subject to required minimum distributions
+
+[[accounts]]
+name = "roth"
+tax = "roth"
+balance = 60000
+
+[[incomes]]
+name = "salary"
+amount = 140000
+start = 2026
+end = 2049 # last full year of work before retiring in 2050
+reduces_by_pretax = true # pretax 401k contributions shrink the taxable base
+
+[[social_security]]
+pia_monthly = 2800
+claim_year = 2052 # delayed past retirement (2050) for a larger monthly benefit
+haircut = 1.0 # full benefit, no solvency haircut assumed
+
+[[expenses]]
+name = "living"
+amount = 60000
+start = 2026
+end = 2091
+
+[[expenses]]
+name = "healthcare"
+amount = 8000
+start = 2026
+end = 2091
+growth_over_inflation = 0.02 # healthcare costs historically outpace general inflation
+
+[[contributions]]
+account = "401k"
+start = 2026
+end = 2049
+to_limit = true # contribute the IRS max every year
+annual_limit_key = "401k"
+pretax = true
+employer_match_pct = 0.05 # 5% of salary, free money on top of the max
+
+[[contributions]]
+account = "roth"
+start = 2026
+end = 2049
+amount = 7000 # IRA-style fixed annual contribution
+
+[[contributions]]
+account = "brokerage"
+start = 2026
+end = 2049
+amount = 6000 # modest taxable savings — this is not an aggressive-FI household
+
+[house]
+value = 350000
+appreciation = 0.035
+property_tax_rate = 0.01
+insurance_rate = 0.003
+maintenance_rate = 0.008
+
+[house.mortgage]
+balance = 180000
+rate = 0.045
+payment_monthly = 1300
+
+[assumptions]
+retirement_year = 2050 # age 65

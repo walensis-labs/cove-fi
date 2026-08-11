@@ -1,0 +1,96 @@
+# Cove FI example: "early-52"
+#
+# An aggressive saver who front-loads retirement accounts and layers a big
+# taxable-brokerage rung on top, targeting financial independence years
+# before a planned retirement date rather than right at it. Contrast this
+# with conventional-65.toml, which saves at a normal rate and reaches FI
+# right around its retirement year, not years ahead of it.
+#
+# Household: born 1990, working 2026-2041, retiring in 2042 at age 52.
+# Salary is set to $225,000 deliberately — that's the fixed income base the
+# engine uses for every `pct_of_income` contribution rung (a PL-parity
+# quirk: pct_of_income is NOT multiplied by this plan's actual salary), so
+# picking that number makes the "pct_of_income" rungs below read as roughly
+# their literal percentage of take-home pay.
+#
+# Things to try changing:
+#   - contributions[2].pct_of_income (brokerage, 0.22): this is the main
+#     lever on the ~40% combined savings rate — raise it and fi_year moves
+#     earlier relative to retirement_year.
+#   - expenses[0].amount: a lower target spend both shrinks the FI number
+#     (25x expenses) and lowers what a future coast/retirement year has to
+#     cover — the double lever behind every early-retirement plan.
+
+[plan]
+birth_year = 1990
+
+[[accounts]]
+name = "cash"
+tax = "cash"
+balance = 15000
+
+[[accounts]]
+name = "brokerage"
+tax = "taxable"
+balance = 25000
+basis = 15000
+
+[[accounts]]
+name = "401k"
+tax = "trad"
+balance = 35000
+rmd = true
+
+[[accounts]]
+name = "roth"
+tax = "roth"
+balance = 20000
+
+[[incomes]]
+name = "salary"
+amount = 225000
+start = 2026
+end = 2041 # last full year of work before retiring in 2042
+reduces_by_pretax = true
+
+[[social_security]]
+pia_monthly = 2200
+claim_year = 2062 # delayed well past retirement — early retirees plan around SS, not on it
+haircut = 0.75 # conservative haircut given the multi-decade gap to claiming
+
+[[expenses]]
+name = "living"
+amount = 55000
+start = 2026
+end = 2091
+
+[[expenses]]
+name = "healthcare"
+amount = 7000
+start = 2026
+end = 2091
+growth_over_inflation = 0.02
+
+[[contributions]]
+account = "401k"
+start = 2026
+end = 2041
+to_limit = true
+annual_limit_key = "401k"
+pretax = true
+employer_match_pct = 0.04
+
+[[contributions]]
+account = "roth"
+start = 2026
+end = 2041
+amount = 7000
+
+[[contributions]]
+account = "brokerage"
+start = 2026
+end = 2041
+pct_of_income = 0.22 # the aggressive taxable-savings rung — see header comment
+
+[assumptions]
+retirement_year = 2042 # age 52

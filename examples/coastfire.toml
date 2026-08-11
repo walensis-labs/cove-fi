@@ -1,0 +1,109 @@
+# Cove FI example: "coastfire"
+#
+# Demonstrates the COAST sentinel: contribution rungs whose `start` or `end`
+# is -1 mean "no fixed date — tied to the coast-fi trigger" instead. Coast
+# triggers the first year liquid net worth reaches a hardcoded 4x trailing
+# 3-year-average expenses — this household saves so aggressively that it
+# happens almost immediately (within a couple of years). From that point,
+# heavy contributions stop and the portfolio is left to compound on its
+# own (plus one small ongoing rung) all the way to full FI (25x expenses),
+# which arrives right around retirement — note: `assumptions.coast_multiple`
+# is NOT wired to the engine's coast trigger in this release; it's the
+# 4x above, fixed, regardless of what that field is set to.
+#
+# Household: born 1992, working 2026-2059, retiring in 2060 at age 68.
+# Contributions 1 and 3 below run `start = 2026, end = -1` — heavy, and
+# they STOP the year coast triggers. Contribution 2 runs `start = -1,
+# end = 2059` — it only STARTS once coast triggers, dialing 401k
+# contributions down to "just enough to keep the employer match" instead
+# of stopping entirely.
+#
+# Things to try changing:
+#   - assumptions.retirement_year: this is the main lever on whether the
+#     post-coast decades of compounding actually catch up to 25x expenses
+#     by the end of the plan — push it earlier and fi_year can go null.
+#   - contributions[2].pct_of_income (brokerage, the heavy pre-coast rung):
+#     raise or lower it and coast_year moves — but notice how little that
+#     ultimately changes the outcome (see header note above).
+
+[plan]
+birth_year = 1992
+
+[[accounts]]
+name = "cash"
+tax = "cash"
+balance = 12000
+
+[[accounts]]
+name = "brokerage"
+tax = "taxable"
+balance = 18000
+basis = 10000
+
+[[accounts]]
+name = "401k"
+tax = "trad"
+balance = 25000
+rmd = true
+
+[[accounts]]
+name = "roth"
+tax = "roth"
+balance = 15000
+
+[[incomes]]
+name = "salary"
+amount = 150000
+start = 2026
+end = 2059 # last full year of work before retiring in 2060
+reduces_by_pretax = true
+
+[[social_security]]
+pia_monthly = 2400
+claim_year = 2060 # delayed to align with retirement at 68
+haircut = 1.0
+
+[[expenses]]
+name = "living"
+amount = 50000
+start = 2026
+end = 2091
+
+[[expenses]]
+name = "healthcare"
+amount = 6000
+start = 2026
+end = 2091
+growth_over_inflation = 0.02
+
+[[contributions]]
+# Heavy pre-coast 401k saving — stops the year coast triggers (end = -1).
+account = "401k"
+start = 2026
+end = -1
+to_limit = true
+annual_limit_key = "401k"
+pretax = true
+employer_match_pct = 0.04
+
+[[contributions]]
+# Post-coast: dial 401k down to just enough to keep the employer match
+# (start = -1 — this rung is dormant until coast triggers, then runs to
+# retirement).
+account = "401k"
+start = -1
+end = 2059
+amount = 6000
+pretax = true
+employer_match_pct = 0.04
+
+[[contributions]]
+# The main heavy-early lever: an aggressive taxable brokerage rung that
+# also stops the moment coast triggers.
+account = "brokerage"
+start = 2026
+end = -1
+pct_of_income = 0.35
+
+[assumptions]
+retirement_year = 2060 # age 68
