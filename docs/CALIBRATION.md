@@ -53,3 +53,14 @@ in CONVENTIONS.md.
 - TypeScript (once ported): `scripts/validate.ts`, reads private paths from
   env (`COVE_FI_PRIVATE_EXPORT`, `COVE_FI_PRIVATE_FIXTURE`); local-only — CI
   never sees the oracle and skips these suites by construction.
+
+### TypeScript harness
+
+`pnpm validate` (root script) builds the package and runs
+`scripts/validate.ts`, reading the private fixture and oracle report from
+`COVE_FI_PRIVATE_PLAN` and `COVE_FI_PRIVATE_REPORT` respectively. As of
+commit `d35a526`, the TypeScript engine reproduces the frozen baseline in
+`private/baseline.md` exactly — same deltas, same divergence pattern,
+row for row. Any future difference between a `pnpm validate` run and that
+baseline is a TS/Python parity bug, not a calibration change, and must be
+fixed before any calibration work proceeds.
