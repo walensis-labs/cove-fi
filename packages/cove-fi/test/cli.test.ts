@@ -74,6 +74,19 @@ describe("cli", () => {
     expect(typeof parsed.fi.retirement_year).toBe("number");
   });
 
+  it("--json before the subcommand produces JSON identical in shape to --json after it", async () => {
+    const planPath = writeTmpPlan(dir);
+    const before = await runCli(["--json", "run", planPath]);
+    const after = await runCli(["run", planPath, "--json"]);
+    expect(before.exitCode).toBeUndefined();
+    expect(after.exitCode).toBeUndefined();
+    expect(before.out.length).toBe(1);
+    const beforeParsed = JSON.parse(before.out[0]!);
+    const afterParsed = JSON.parse(after.out[0]!);
+    expect(Object.keys(beforeParsed).sort()).toEqual(Object.keys(afterParsed).sort());
+    expect(beforeParsed).toEqual(afterParsed);
+  });
+
   it("check on a broken plan file exits nonzero and lists the issue", async () => {
     const brokenPath = join(dir, "broken.toml");
     const broken = dumpPlan(syntheticPlan()).replace(/account = "401k"/, 'account = "401kk"');
@@ -152,6 +165,26 @@ describe("cli", () => {
     expect(parsed.series.base).toBeDefined();
     expect(parsed.series.later).toBeDefined();
     expect(parsed.deltas.later).toBeDefined();
+  });
+
+  it("compare with an unknown override key exits nonzero and names the bad key, never a raw stack", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["compare", planPath, "--scenario", "x:bogus_key=1"]);
+    expect(exitCode).toBe(1);
+    const text = err.join("\n");
+    expect(text).toMatch(/^error:/);
+    expect(text).toMatch(/bogus_key/);
+    expect(text).not.toMatch(/at .*\.ts:\d+/);
+  });
+
+  it("compare with a non-numeric override value exits nonzero and names the bad value, never a raw stack", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["compare", planPath, "--scenario", "x:ret=abc"]);
+    expect(exitCode).toBe(1);
+    const text = err.join("\n");
+    expect(text).toMatch(/^error:/);
+    expect(text).toMatch(/abc/);
+    expect(text).not.toMatch(/at .*\.ts:\d+/);
   });
 
   it("mcp prints a not-yet-available message and exits nonzero", async () => {

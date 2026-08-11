@@ -162,9 +162,22 @@ function renderCompareTable(entries: CompareEntry[]): string[] {
 // program
 // ---------------------------------------------------------------------
 
+/** `--json` is declared both on the root program (so `cove-fi --json run plan.toml`
+ * parses) and on each data-output subcommand (so `cove-fi run plan.toml --json`
+ * keeps working) — `Command.optsWithGlobals()` merges local + ancestor option
+ * values, local wins when both are set, so either placement produces the
+ * same result. */
+function resolveJson(opts: { json?: boolean }, cmd: Command): boolean {
+  return !!(opts.json ?? cmd.optsWithGlobals().json);
+}
+
 export function buildProgram(io: Io = defaultIo): Command {
   const program = new Command();
-  program.name("cove-fi").description("Cove FI — retirement/FI projection engine").version("0.1.0");
+  program
+    .name("cove-fi")
+    .description("Cove FI — retirement/FI projection engine")
+    .version("0.1.0")
+    .option("--json", "output JSON instead of a table (run/scenario/compare)");
 
   program
     .command("init")
@@ -187,11 +200,11 @@ export function buildProgram(io: Io = defaultIo): Command {
     .description("Run a plan and print its projection")
     .argument("<plan>", "path to plan TOML file")
     .option("--json", "output JSON instead of a table")
-    .action((planPath: string, opts: { json?: boolean }) => {
+    .action((planPath: string, opts: { json?: boolean }, cmd: Command) => {
       try {
         const session = new Session();
         session.loadPlanFile(planPath);
-        printProjection(io, session, undefined, !!opts.json);
+        printProjection(io, session, undefined, resolveJson(opts, cmd));
       } catch (err) {
         fail(err);
       }
@@ -220,6 +233,7 @@ export function buildProgram(io: Io = defaultIo): Command {
           ssClaimYear?: number;
           json?: boolean;
         },
+        cmd: Command,
       ) => {
         try {
           const session = new Session();
@@ -232,7 +246,7 @@ export function buildProgram(io: Io = defaultIo): Command {
           if (opts.ssHaircut !== undefined) overrides.ss_haircut = opts.ssHaircut;
           if (opts.ssClaimYear !== undefined) overrides.ss_claim_year = opts.ssClaimYear;
           session.defineScenario("cli", overrides);
-          printProjection(io, session, "cli", !!opts.json);
+          printProjection(io, session, "cli", resolveJson(opts, cmd));
         } catch (err) {
           fail(err);
         }
@@ -245,7 +259,7 @@ export function buildProgram(io: Io = defaultIo): Command {
     .argument("<plan>", "path to plan TOML file")
     .option("--scenario <spec>", "name:key=val,key=val,... (repeatable; first is the baseline)", collectScenario, [] as string[])
     .option("--json", "output the raw compareScenarios JSON")
-    .action((planPath: string, opts: { scenario: string[]; json?: boolean }) => {
+    .action((planPath: string, opts: { scenario: string[]; json?: boolean }, cmd: Command) => {
       try {
         if (!opts.scenario || opts.scenario.length === 0) {
           throw new Error("compare requires at least one --scenario name:key=val,...");
@@ -256,7 +270,7 @@ export function buildProgram(io: Io = defaultIo): Command {
         for (const s of specs) session.defineScenario(s.name, s.overrides);
         const names = specs.map((s) => s.name);
         const cmp = session.compareScenarios(names);
-        if (opts.json) {
+        if (resolveJson(opts, cmd)) {
           io.out(JSON.stringify(cmp));
           return;
         }
