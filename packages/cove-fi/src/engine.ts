@@ -133,15 +133,15 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
     }
     const inCoast = coastYear !== null && y > coastYear;
     let pretax = 0.0;
-    let contribs: Record<string, number> = {};
-    let matches: Record<string, number> = {};
+    let contribs: Map<string, number> = new Map();
+    let matches: Map<string, number> = new Map();
     let taxes: number;
     if (y <= lastWorkYear) {
       for (let iter = 0; iter < 4; iter++) {
         taxes = Math.max(gross - pretax, 0.0) * ordRate;
         let available = gross - taxes - exp;
-        const newContribs: Record<string, number> = {};
-        const newMatches: Record<string, number> = {};
+        const newContribs: Map<string, number> = new Map();
+        const newMatches: Map<string, number> = new Map();
         let newPretax = 0.0;
         for (const c of plan.contributions) {
           if ((c.end === COAST && inCoast) || (c.start === COAST && !inCoast)) {
@@ -178,8 +178,8 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
             m = amt > 0 ? c.employer_match_flat * f * frac : 0.0;
           }
           const key = c.account;
-          newContribs[key] = (newContribs[key] ?? 0.0) + amt;
-          newMatches[key] = (newMatches[key] ?? 0.0) + m;
+          newContribs.set(key, (newContribs.get(key) ?? 0.0) + amt);
+          newMatches.set(key, (newMatches.get(key) ?? 0.0) + m);
           if (c.pretax) {
             newPretax += amt;
           }
@@ -195,13 +195,16 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
         pretax = newPretax;
       }
       taxes = Math.max(gross - pretax, 0.0) * ordRate;
-      const contribSum = Object.values(contribs).reduce((s, v) => s + v, 0);
+      let contribSum = 0.0;
+      for (const v of contribs.values()) {
+        contribSum += v;
+      }
       const surplus = gross - taxes - exp - contribSum;
       if (surplus > 0) {
         exp += surplus; // cashFlowDefault: "spend"
       }
-      for (const [k, v] of Object.entries(contribs)) {
-        bal[k]! += v + (matches[k] ?? 0.0);
+      for (const [k, v] of contribs) {
+        bal[k]! += v + (matches.get(k) ?? 0.0);
         if (accBy[k]!.tax === "taxable") {
           basis[k]! += v;
         }
@@ -213,12 +216,12 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
 
     // dividends on taxable balances (qualified, taxed at cap-gains)
     let div = 0.0;
-    for (const [n, acc] of Object.entries(accBy)) {
+    for (const acc of plan.accounts) {
       if (acc.tax === "taxable") {
-        div += bal[n]!;
+        div += bal[acc.name]!;
       }
     }
-    div *= a.dividend_rate * frac;
+    div = div * a.dividend_rate * frac;
     taxes += div * a.cap_gains_tax;
 
     // ---------- retirement: fund the gap ----------

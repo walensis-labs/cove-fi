@@ -179,6 +179,7 @@ export const COAST = -1;
 export function normalizePlan(plan: Plan): Plan {
   return {
     ...plan,
+    assumptions: { ...DEFAULT_ASSUMPTIONS, ...plan.assumptions },
     accounts: plan.accounts.map((acc) => ({
       ...acc,
       growth: acc.growth ?? null,
