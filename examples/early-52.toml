@@ -78,7 +78,7 @@ end = 2041
 to_limit = true
 annual_limit_key = "401k"
 pretax = true
-employer_match_pct = 0.04
+employer_match_pct = 0.04 # matches against a fixed $225k base (engine quirk) — happens to equal 4% of this plan's own salary since salary = 225000 above
 
 [[contributions]]
 account = "roth"
