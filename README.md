@@ -16,6 +16,12 @@ cove-fi run my-plan.toml           # project it
 cove-fi scenario my-plan.toml --retirement-year 2048   # try a scenario
 ```
 
+Note: `--retirement-year` moves the work/retirement boundary only — it
+doesn't shorten any income event's own `end` date, so for a full
+early-retirement what-if, shorten your salary's `end` year in the plan too.
+See [`packages/cove-fi/README.md`](./packages/cove-fi/README.md) for the
+full explanation.
+
 Full walkthrough, MCP setup, and command reference:
 [`packages/cove-fi/README.md`](./packages/cove-fi/README.md).
 

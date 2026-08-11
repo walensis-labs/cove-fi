@@ -55,6 +55,13 @@ and depletion year (if any). Try a scenario without touching the file:
 cove-fi scenario my-plan.toml --retirement-year 2048
 ```
 
+> **Note:** `--retirement-year` moves the simulation's work/retirement
+> boundary (contributions stop, drawdown starts) — it does not shorten any
+> income event's own `end` date. For a full early-retirement what-if,
+> shorten your salary income's `end` year in the plan too, so income
+> actually stops instead of continuing to be "earned" into the years you
+> just told the simulator you'd retired.
+
 Other commands: `cove-fi check my-plan.toml` (validate without running),
 `cove-fi compare my-plan.toml --scenario "base:" --scenario
 "early:retirement_year=2048"` (side-by-side comparison table), and
@@ -71,7 +78,11 @@ instead of starting from the bare template.
 `get_assumptions`, `set_assumption`, `run_projection`, `fi_status`,
 `run_scenario`, `compare_scenarios`) so you can talk through your plan in
 plain language instead of memorizing CLI flags — "try retiring at 57",
-"what if Social Security gets cut 25%", "compare 60 vs 65".
+"what if Social Security gets cut 25%", "compare 60 vs 65". As with the CLI
+`scenario` command, `run_scenario`'s `retirement_year` override moves the
+work/retirement boundary only — it doesn't shorten income events' own `end`
+dates, so ask for (or make) that plan edit too when a what-if depends on
+income actually stopping.
 
 Setup is a one-liner per client:
 
