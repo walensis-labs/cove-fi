@@ -1,0 +1,160 @@
+/**
+ * TOML plan files.
+ *
+ * TOML sections mirror the model 1:1, with one exception: `birth_year`
+ * (top-level on `Plan`) lives under a `[plan]` table in TOML, because a bare
+ * top-level scalar can't precede array-of-tables sections in a readable
+ * file. Everything else — `[[accounts]]`, `[[incomes]]`, `[[social_security]]`,
+ * `[[expenses]]`, `[[contributions]]`, `[house]` (+ `[house.mortgage]`),
+ * `[assumptions]`, and the plain `drawdown_order` array — matches the JSON
+ * shape `planFromJson` already validates.
+ *
+ * `loadPlan` = parse (smol-toml) -> reshape (`[plan].birth_year` back to
+ * top-level) -> `planFromJson` (reuses every validation rule; its
+ * `PlanValidationError` is rewrapped as `PlanfileError` so callers only need
+ * to catch one error type from this module).
+ *
+ * `dumpPlan` builds the same TOML-shaped object and hands it to
+ * `stringify`. TOML has no null: smol-toml's `stringify` already omits any
+ * key whose value is `null`/`undefined` (verified at every nesting level —
+ * top-level, inside array-of-tables entries, and inside `[house]`), so we
+ * don't need to strip nulls by hand. `loadPlan`'s `planFromJson` call
+ * refills them via `normalizePlan`. COAST (-1) sentinels are plain
+ * integers and pass through TOML natively.
+ *
+ * Round-trip contract: `dumpPlan` dumps a plan's full *normalized* shape
+ * (every optional field present, defaults filled), and `loadPlan` always
+ * returns a normalized plan. So `loadPlan(dumpPlan(p))` only reproduces `p`
+ * exactly when `p` is already normalized (a fixed point of
+ * `normalizePlan`) — which is what `test/planfile.test.ts` asserts, using
+ * `syntheticPlan()` (itself built via `normalizePlan`).
+ */
+import { parse, stringify } from "smol-toml";
+import { CITED_DEFAULTS, SPENDING_SMILE_FLAG } from "./defaults.js";
+import { DEFAULT_ASSUMPTIONS, type Plan } from "./model.js";
+import { planFromJson, PlanValidationError } from "./planjson.js";
+
+export class PlanfileError extends Error {
+  issues: string[];
+  constructor(issues: string[]) {
+    super(`Invalid plan file:\n- ${issues.join("\n- ")}`);
+    this.name = "PlanfileError";
+    this.issues = issues;
+  }
+}
+
+/** `[plan].birth_year` in TOML -> top-level `birth_year` in the JSON shape `planFromJson` expects; every other key passes through untouched. */
+function reshapeFromToml(parsed: unknown): unknown {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return parsed;
+  }
+  const obj = parsed as Record<string, unknown>;
+  const planTable = obj.plan;
+  const birth_year =
+    typeof planTable === "object" && planTable !== null && !Array.isArray(planTable)
+      ? (planTable as Record<string, unknown>).birth_year
+      : undefined;
+  const { plan: _plan, ...rest } = obj;
+  return { birth_year, ...rest };
+}
+
+export function loadPlan(tomlText: string): Plan {
+  let parsed: unknown;
+  try {
+    parsed = parse(tomlText);
+  } catch (err) {
+    throw new PlanfileError([`TOML parse error: ${(err as Error).message}`]);
+  }
+  try {
+    return planFromJson(reshapeFromToml(parsed));
+  } catch (err) {
+    if (err instanceof PlanValidationError) {
+      throw new PlanfileError(err.issues);
+    }
+    throw err;
+  }
+}
+
+export function dumpPlan(plan: Plan): string {
+  const tomlShape = {
+    plan: { birth_year: plan.birth_year },
+    accounts: plan.accounts,
+    incomes: plan.incomes,
+    social_security: plan.social_security,
+    expenses: plan.expenses,
+    contributions: plan.contributions,
+    house: plan.house ?? null,
+    assumptions: plan.assumptions,
+    drawdown_order: plan.drawdown_order,
+  };
+  return stringify(tomlShape);
+}
+
+// ---------------------------------------------------------------------
+// initTemplate()
+// ---------------------------------------------------------------------
+
+const TEMPLATE_PLAN: Plan = {
+  birth_year: 1990,
+  accounts: [
+    { name: "cash", tax: "cash", balance: 10000 },
+    { name: "brokerage", tax: "taxable", balance: 20000 },
+    { name: "401k", tax: "trad", balance: 50000, rmd: true },
+    { name: "roth", tax: "roth", balance: 20000 },
+  ],
+  incomes: [{ name: "salary", amount: 75000, start: 2026, end: 2051 }],
+  social_security: [],
+  expenses: [{ name: "living", amount: 60000, start: 2026, end: 2091 }],
+  contributions: [
+    { account: "401k", start: 2026, end: 2091, to_limit: true, annual_limit_key: "401k", pretax: true },
+    { account: "roth", start: 2026, end: 2091, amount: 7000 },
+  ],
+  // house intentionally omitted — see the commented-out example appended below.
+  assumptions: DEFAULT_ASSUMPTIONS,
+};
+
+const HOUSE_EXAMPLE = `
+# Example house block (uncomment and adjust to add a primary residence):
+# [house]
+# value = 400000
+# appreciation = 0.039
+# property_tax_rate = 0.01
+# insurance_rate = 0.003
+# maintenance_rate = 0.01
+# hoa_monthly = 0
+#
+# [house.mortgage]
+# balance = 300000
+# rate = 0.0625
+# payment_monthly = 1800
+`;
+
+const HEADER = `# Cove FI plan file.
+#
+# Generated by \`cove-fi init\`. Every [[section]] is an array of tables
+# (accounts, incomes, expenses, contributions); [plan], [house], and
+# [assumptions] are single tables. See docs/ASSUMPTIONS.md for where each
+# assumption default comes from, and COAST_START / COAST_END semantics
+# (a contribution rung with start = -1 or end = -1 means "no fixed date;
+# runs from/until the coast-fi trigger") in the design doc.
+#
+# The "${SPENDING_SMILE_FLAG}" flag is reserved for a future retirement
+# spending curve (Blanchett 2014) and is OFF in this release — the engine
+# ignores it in 0.1.
+`;
+
+/** Inject one comment line, pulled from CITED_DEFAULTS, above each assumption key that has a citation. Every regex targets a line dumpPlan(TEMPLATE_PLAN) is guaranteed to emit verbatim, so this stays parse-safe by construction. */
+function annotateAssumptions(toml: string): string {
+  let out = toml;
+  for (const d of CITED_DEFAULTS) {
+    const lineRe = new RegExp(`^(${d.key} = .*)$`, "m");
+    out = out.replace(lineRe, `# ${d.source}\n$1`);
+  }
+  return out;
+}
+
+export function initTemplate(): string {
+  const base = dumpPlan(TEMPLATE_PLAN);
+  const annotated = annotateAssumptions(base);
+  return `${HEADER}\n${annotated}\n${HOUSE_EXAMPLE}`;
+}
