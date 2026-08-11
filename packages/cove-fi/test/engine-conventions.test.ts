@@ -144,11 +144,11 @@ describe("conventions", () => {
 
   it("3: surplus is spent — income identity holds every working year", () => {
     for (const r of rows.filter((r) => r.year < plan.assumptions.retirement_year)) {
-      // dividends tax and nominal_at_start timing wedges: income - taxes - contributions - expenses
-      // must be ~0 (surplus folded into expenses) when cash flow is positive. Years with nominal_at_start
-      // expenses (e.g., 2035 car at $25k) create ~$18k timing asymmetries; bound set to $20k to allow.
+      // positive side: surplus is always spent (income identity holds). negative side: working-year deficits
+      // from timing wedges (e.g., 2035 nominal_at_start car expense creates ~-$18.3k residual) are allowed.
       const resid = r.income - r.taxes - r.contributions - r.expenses;
-      expect(Math.abs(resid), `year ${r.year}`).toBeLessThan(20000);
+      expect(resid, `year ${r.year}`).toBeLessThan(1);
+      expect(resid, `year ${r.year}`).toBeGreaterThan(-20_000);
     }
   });
 
