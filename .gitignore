@@ -1,0 +1,4 @@
+private/
+*.private.*
+node_modules/
+dist/
