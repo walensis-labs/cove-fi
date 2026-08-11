@@ -1,0 +1,21 @@
+{
+  "name": "cove-fi-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.5.1",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "validate": "pnpm -F @walensis/cove-fi build && tsx scripts/validate.ts"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.31.1",
+    "@types/node": "^20",
+    "tsup": "^8.0.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

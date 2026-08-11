@@ -1,0 +1,24 @@
+{
+  "name": "@walensis/cove-fi",
+  "version": "0.0.0",
+  "description": "Retirement/FI projection engine — deterministic annual simulator with plan files, CLI, and MCP server. The Project module of the Cove suite.",
+  "type": "module",
+  "license": "MIT",
+  "bin": { "cove-fi": "./dist/cli.js" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": { "type": "git", "url": "git+https://github.com/walensis-labs/cove-fi.git", "directory": "packages/cove-fi" },
+  "keywords": ["fire", "retirement", "financial-independence", "monte-carlo", "mcp"],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "commander": "^12.0.0",
+    "smol-toml": "^1.3.0",
+    "zod": "^3.23.0"
+  }
+}
