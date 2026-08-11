@@ -69,4 +69,59 @@ describe("mcp server", () => {
     const r = await client.callTool({ name: "set_assumption", arguments: { key: "bogus_key", value: 1 } });
     expect(r.isError).toBe(true);
   });
+  it("get_assumptions returns the loaded plan's assumptions, including a value changed via set_assumption", async () => {
+    await call("load_plan", { path: planPath });
+    await call("set_assumption", { key: "ret", value: 0.42 });
+    const a = await call("get_assumptions");
+    expect(a.ret).toBe(0.42);
+    expect(a).toHaveProperty("retirement_year");
+    expect(a).toHaveProperty("inflation");
+  });
+  it("run_scenario rejects an extra_expenses entry missing `amount` as a structured error, not a NaN-riddled projection", async () => {
+    await call("load_plan", { path: planPath });
+    const r = await client.callTool({
+      name: "run_scenario",
+      arguments: {
+        name: "broken",
+        overrides: { extra_expenses: [{ name: "mystery", start: 2030, end: 2035 }] },
+      },
+    });
+    expect(r.isError).toBe(true);
+  });
+  it("run_scenario with a well-formed extra expense changes the projection and contains no nulls", async () => {
+    await call("load_plan", { path: planPath });
+    const base = await call("run_projection");
+    await call("run_scenario", {
+      name: "extra-spend",
+      overrides: {
+        extra_expenses: [{ name: "boat", amount: 20000, start: 2030, end: 2040 }],
+      },
+    });
+    const proj = await call("run_projection", { scenario: "extra-spend" });
+    // Both projections eventually deplete liquid net worth to the same
+    // illiquid-only floor, so the *final* row can coincide even though the
+    // expense clearly changed the trajectory — compare a row inside the
+    // 2030-2040 expense window instead (kept by thinning's "every 5th"
+    // sampling) rather than relying on the last row alone.
+    const baseMid = base.rows.find((r: { year: number }) => r.year === 2031);
+    const projMid = proj.rows.find((r: { year: number }) => r.year === 2031);
+    expect(baseMid).toBeDefined();
+    expect(projMid).toBeDefined();
+    expect(projMid.net_worth).not.toBe(baseMid.net_worth);
+    for (const row of [...proj.rows, ...proj.todays]) {
+      for (const v of Object.values(row)) {
+        expect(v).not.toBeNull();
+        expect(Number.isNaN(v as number)).toBe(false);
+      }
+    }
+  });
+  it("compare_scenarios series is thinned to <=30 rows per scenario", async () => {
+    await call("load_plan", { path: planPath });
+    await call("run_scenario", { name: "late", overrides: { retirement_year: 2055 } });
+    await call("run_scenario", { name: "early", overrides: { retirement_year: 2045 } });
+    const cmp = await call("compare_scenarios", { names: ["late", "early"] });
+    expect(cmp.series.late.length).toBeLessThanOrEqual(30);
+    expect(cmp.series.early.length).toBeLessThanOrEqual(30);
+    expect(cmp.years.length).toBe(cmp.series.late.length);
+  });
 });

@@ -15,7 +15,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { type YearRow } from "../engine.js";
 import { type Assumptions, DEFAULT_ASSUMPTIONS } from "../model.js";
-import { type FiStatus, type ScenarioOverrides, Session } from "../session.js";
+import { type FiStatus, Session } from "../session.js";
 
 // ---------------------------------------------------------------------
 // result helpers
@@ -70,14 +70,37 @@ function roundFiStatus(fi: FiStatus): FiStatus {
 }
 
 // ---------------------------------------------------------------------
-// row thinning (run_projection only — full tables stay a CLI/--json
-// concern). Keeps: first 5 years, every 5th year thereafter, retirement
-// year +/-2, and the final year. Guarantees <=30 rows for a 66-year plan.
+// row thinning (run_projection and compare_scenarios' series — full
+// tables stay a CLI/--json concern). Sampling rule: first 5 years, every
+// 5th year thereafter, retirement year +/-2, and the final year. Hard
+// bound: never returns more than MAX_ROWS rows, regardless of plan
+// length — if the sampled set is still too big, it's evenly downsampled
+// (see `downsampleIndices`).
 // ---------------------------------------------------------------------
 
-function thinRows(rows: YearRow[], retirementYear: number): YearRow[] {
+const MAX_ROWS = 30;
+
+/** Evenly spaced downsample of a sorted, deduped index list to at most
+ * `max` entries. Always keeps the first and last index. */
+function downsampleIndices(indices: number[], max: number): number[] {
+  if (indices.length <= max) return indices;
+  const lastIdx = indices.length - 1;
+  const step = lastIdx / (max - 1);
+  const out = new Set<number>();
+  for (let k = 0; k < max; k++) {
+    out.add(indices[Math.round(k * step)]!);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/** The index set thinning keeps, before the hard-bound downsample. Exposed
+ * separately from `thinRows` so `compare_scenarios` can apply one shared
+ * index set across `years` and every scenario's `series` (they're index-
+ * aligned — every scenario shares the same start_year..end_year row
+ * count; only *when* retirement happens shifts, not the row count). */
+function thinIndices(rows: YearRow[], retirementYear: number): number[] {
   const n = rows.length;
-  if (n === 0) return rows;
+  if (n === 0) return [];
   const keep = new Set<number>();
   for (let i = 0; i < Math.min(5, n); i++) keep.add(i);
   for (let i = 5; i < n; i += 5) keep.add(i);
@@ -85,7 +108,11 @@ function thinRows(rows: YearRow[], retirementYear: number): YearRow[] {
     if (Math.abs(rows[i]!.year - retirementYear) <= 2) keep.add(i);
   }
   keep.add(n - 1);
-  return [...keep].sort((a, b) => a - b).map((i) => rows[i]!);
+  return downsampleIndices([...keep].sort((a, b) => a - b), MAX_ROWS);
+}
+
+function thinRows(rows: YearRow[], retirementYear: number): YearRow[] {
+  return thinIndices(rows, retirementYear).map((i) => rows[i]!);
 }
 
 // ---------------------------------------------------------------------
@@ -94,6 +121,30 @@ function thinRows(rows: YearRow[], retirementYear: number): YearRow[] {
 
 const ASSUMPTIONS_KEYS = Object.keys(DEFAULT_ASSUMPTIONS) as [keyof Assumptions, ...(keyof Assumptions)[]];
 
+// Explicit shapes (not a z.record(z.unknown()) passthrough): the engine
+// has no validation of its own for extra_expenses/extra_incomes — a
+// missing `amount` becomes `undefined * x = NaN`, which then poisons
+// every subsequent year's balances silently. Zod must reject a malformed
+// entry at the protocol boundary, before it ever reaches Session/engine.
+const extraExpenseShape = z.object({
+  name: z.string(),
+  amount: z.number(),
+  start: z.number().int(),
+  end: z.number().int(),
+  growth_over_inflation: z.number().optional(),
+  nominal_at_start: z.boolean().optional(),
+  fund_from: z.string().optional(),
+});
+
+const extraIncomeShape = z.object({
+  name: z.string(),
+  amount: z.number(),
+  start: z.number().int(),
+  end: z.number().int(),
+  taxable: z.boolean().optional(),
+  reduces_by_pretax: z.boolean().optional(),
+});
+
 const scenarioOverridesShape = {
   retirement_year: z.number().optional(),
   inflation: z.number().optional(),
@@ -101,8 +152,8 @@ const scenarioOverridesShape = {
   savings_rate_multiplier: z.number().optional(),
   ss_haircut: z.number().optional(),
   ss_claim_year: z.number().optional(),
-  extra_expenses: z.array(z.record(z.unknown())).optional(),
-  extra_incomes: z.array(z.record(z.unknown())).optional(),
+  extra_expenses: z.array(extraExpenseShape).optional(),
+  extra_incomes: z.array(extraIncomeShape).optional(),
 };
 
 // ---------------------------------------------------------------------
@@ -181,11 +232,7 @@ export function createServer(session: Session): McpServer {
     },
     ({ name, overrides }) =>
       guarded(() => {
-        // extra_expenses/extra_incomes are passthrough records at the zod
-        // boundary — Session/planjson validate their actual Expense/Income
-        // shape at run time; a bad entry surfaces as a structured tool
-        // error via `guarded`, not a crash.
-        session.defineScenario(name, overrides as ScenarioOverrides);
+        session.defineScenario(name, overrides);
         return { name, fi: roundFiStatus(session.fiStatus(name)) };
       }),
   );
@@ -199,15 +246,24 @@ export function createServer(session: Session): McpServer {
     ({ names }) =>
       guarded(() => {
         const cmp = session.compareScenarios(names);
+        // Anchor thinning on the loaded (base) plan's retirement_year: a
+        // ScenarioOverrides.retirement_year override only shifts *when*
+        // retirement happens, never the plan's start_year..end_year row
+        // count, so one shared index set stays aligned across `years` and
+        // every scenario's `series` without re-deriving it per scenario.
+        const anchorYear = session.plan!.assumptions.retirement_year;
+        const baseRows = cmp.series[names[0]!]!;
+        const indices = thinIndices(baseRows, anchorYear);
+        const years = indices.map((i) => cmp.years[i]!);
         const series: Record<string, YearRow[]> = {};
         for (const [name, rows] of Object.entries(cmp.series)) {
-          series[name] = rows.map(roundRow);
+          series[name] = indices.map((i) => roundRow(rows[i]!));
         }
         const deltas: Record<string, { fi_year_delta: number | null; terminal_delta: number }> = {};
         for (const [name, d] of Object.entries(cmp.deltas)) {
           deltas[name] = { fi_year_delta: d.fi_year_delta, terminal_delta: Math.round(d.terminal_delta) };
         }
-        return { years: cmp.years, series, deltas };
+        return { years, series, deltas };
       }),
   );
 
