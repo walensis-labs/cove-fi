@@ -51,7 +51,7 @@ in CONVENTIONS.md.
 
 - Python reference: `cd ~/develop/cove-fi-python-reference && python3 validate.py <reports.json>`
 - TypeScript (once ported): `scripts/validate.ts`, reads private paths from
-  env (`COVE_FI_PRIVATE_EXPORT`, `COVE_FI_PRIVATE_FIXTURE`); local-only — CI
+  env (`COVE_FI_PRIVATE_PLAN`, `COVE_FI_PRIVATE_REPORT`); local-only — CI
   never sees the oracle and skips these suites by construction.
 
 ### TypeScript harness
