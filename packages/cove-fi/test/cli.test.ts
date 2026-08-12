@@ -253,3 +253,18 @@ describe("cli", () => {
     expect(err.join("\n")).toMatch(/^error:/);
   });
 });
+
+describe("bin shim invocation (npm installs the bin as a symlink)", () => {
+  it("runs main() when invoked through a symlink like node_modules/.bin", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { symlinkSync, existsSync, mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join, resolve } = await import("node:path");
+    const cliJs = resolve(import.meta.dirname, "../dist/cli.js");
+    if (!existsSync(cliJs)) return; // requires a build; CI builds before testing
+    const link = join(mkdtempSync(join(tmpdir(), "covefi-bin-")), "cove-fi");
+    symlinkSync(cliJs, link);
+    const out = execFileSync(process.execPath, [link, "--version"], { encoding: "utf8" });
+    expect(out.trim()).toMatch(/^\d+\.\d+\.\d+$/); // silent empty output = the npx bug
+  });
+});

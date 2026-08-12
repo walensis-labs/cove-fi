@@ -14,7 +14,7 @@
  * as a script (the `import.meta.url` guard below), so importing
  * `buildProgram` for tests has no side effects.
  */
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
@@ -390,7 +390,18 @@ async function main(): Promise<void> {
   await program.parseAsync(process.argv);
 }
 
-const isMainModule = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+// npm installs bins as symlinks (node_modules/.bin/cove-fi -> dist/cli.js);
+// node resolves import.meta.url to the real path but leaves argv[1] as the
+// symlink, so both sides must be realpath'd or npx invocations silently no-op.
+const isMainModule = (() => {
+  const argv1 = process.argv[1];
+  if (argv1 === undefined) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(argv1)).href;
+  } catch {
+    return false;
+  }
+})();
 if (isMainModule) {
   main().catch(fail);
 }
