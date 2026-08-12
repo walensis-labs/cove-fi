@@ -50,7 +50,7 @@ balance = 20000
 name = "salary"
 amount = 225000
 start = 2026
-end = 2041 # last full year of work before retiring in 2042
+end = "retirement" # ends automatically the year before assumptions.retirement_year (2042)
 reduces_by_pretax = true
 
 [[social_security]]

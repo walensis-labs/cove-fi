@@ -1,6 +1,13 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { run } from "../src/engine.js";
+import { RETIREMENT } from "../src/model.js";
 import { planFromJson } from "../src/planjson.js";
+import { dumpPlan } from "../src/planfile.js";
+import { Session } from "../src/session.js";
+import { syntheticPlan } from "./helpers/synthetic.js";
 
 const base = (over: object = {}) => planFromJson({
   birth_year: 1990,
@@ -44,5 +51,38 @@ describe("income-relative bases", () => {
     const dTax = run(taxed)[0]!.taxes - run(untaxed)[0]!.taxes;
     expect(run(untaxed)[0]!.taxes).toBeCloseTo(0, 6);
     expect(dTax).toBeCloseTo(100_000 * 0.31, 6);
+  });
+});
+
+describe("RETIREMENT sentinel + coast_multiple", () => {
+  it("income.end = RETIREMENT follows scenario retirement_year", () => {
+    const p = base({
+      incomes: [{ name: "salary", amount: 100_000, start: 2026, end: RETIREMENT }],
+      assumptions: { ...base().assumptions, end_year: 2032, retirement_year: 2030 },
+    });
+    const early = run(p, { retirement_year: 2028 });
+    const late = run(p);
+    const y2029 = (rows: ReturnType<typeof run>) => rows.find((r) => r.year === 2029)!;
+    expect(y2029(early).income).toBe(0); // retired 2028 -> no salary 2029
+    expect(y2029(late).income).toBeGreaterThan(0);
+  });
+});
+
+describe("coast_multiple", () => {
+  const coastYearAt = (cm: number) => {
+    const p = { ...syntheticPlan(), assumptions: { ...syntheticPlan().assumptions, coast_multiple: cm } };
+    const path = join(mkdtempSync(join(tmpdir(), "covefi-")), "p.toml");
+    writeFileSync(path, dumpPlan(p));
+    const s = new Session();
+    s.loadPlanFile(path);
+    return s.fiStatus().coast_year;
+  };
+  it("lower multiple coasts no later than higher", () => {
+    const c3 = coastYearAt(3);
+    const c6 = coastYearAt(6);
+    expect(c3).not.toBeNull();
+    expect(c6).not.toBeNull();
+    expect(c3!).toBeLessThanOrEqual(c6!);
+    expect(c3).not.toBe(coastYearAt(400) ?? -1); // absurd multiple never coasts (null) — proves the knob is live
   });
 });

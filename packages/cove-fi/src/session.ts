@@ -20,7 +20,10 @@
  * dollars — the engine inflates it like any other `amount` rung) with
  * `to_limit` dropped to `false`. `ss_haircut`/`ss_claim_year` overwrite
  * those fields on every `SocialSecurity` entry. `extra_expenses` and
- * `extra_incomes` append to the plan's existing lists.
+ * `extra_incomes` append to the plan's existing lists. Any income whose
+ * `end` is the `RETIREMENT` sentinel follows `retirement_year` for free —
+ * the engine resolves it from the *effective* assumptions, so a
+ * `retirement_year` override here moves that income's end date too.
  */
 import { readFileSync } from "node:fs";
 import { run, type YearRow } from "./engine.js";
@@ -117,14 +120,14 @@ function toTodaysDollars(rows: YearRow[], a: Assumptions): YearRow[] {
   });
 }
 
-/** Same rule as the engine's internal coast-year trigger (literal 4x, trailing 3-year average expenses), recomputed from finished rows. */
-function computeCoastYear(rows: YearRow[]): number | null {
+/** Same rule as the engine's internal coast-year trigger (assumptions.coast_multiple x trailing 3-year average expenses), recomputed from finished rows. */
+function computeCoastYear(rows: YearRow[], coastMultiple: number): number | null {
   const spendHist: number[] = [];
   for (const r of rows) {
     spendHist.push(r.expenses);
     const tail = spendHist.slice(-3);
     const avg = tail.reduce((s, v) => s + v, 0) / Math.min(spendHist.length, 3);
-    if (r.liquid_net_worth >= 4 * avg) {
+    if (r.liquid_net_worth >= coastMultiple * avg) {
       return r.year;
     }
   }
@@ -150,7 +153,7 @@ function computeFiStatus(rows: YearRow[], a: Assumptions): FiStatus {
   const factor = (1 + a.inflation) ** (last.year - a.start_year);
   return {
     fi_year: computeFiYear(rows, a.fi_multiple),
-    coast_year: computeCoastYear(rows),
+    coast_year: computeCoastYear(rows, a.coast_multiple),
     depletion_year: computeDepletionYear(rows, a.retirement_year),
     terminal_net_worth: last.net_worth,
     terminal_net_worth_todays: last.net_worth / factor,

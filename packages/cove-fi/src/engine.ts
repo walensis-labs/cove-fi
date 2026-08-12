@@ -18,6 +18,7 @@ import {
   IRS_LIMITS_2026,
   normalizePlan,
   type Plan,
+  RETIREMENT,
   RMD_TABLE,
   type TaxType,
 } from "./model.js";
@@ -45,6 +46,10 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
   if (overrides) {
     a = { ...a, ...overrides };
   }
+  // income.end === RETIREMENT tracks the scenario's (possibly overridden)
+  // retirement_year rather than a fixed year — resolved here, under
+  // EFFECTIVE assumptions, so the rest of run() never sees the sentinel.
+  const incomes = plan.incomes.map((i) => (i.end === RETIREMENT ? { ...i, end: a.retirement_year - 1 } : i));
   let rateFor: (y: number) => { ret: number; inflation: number };
   if (rates) {
     const byYear = new Map<number, YearRates>();
@@ -116,7 +121,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
     // ---------- income ----------
     let gross = 0.0;
     let taxableGross = 0.0;
-    for (const i of plan.incomes) {
+    for (const i of incomes) {
       if (i.start <= y && y <= i.end) {
         const amt = i.amount * f * frac;
         gross += amt;
@@ -350,7 +355,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
     spendHist.push(row.expenses);
     const tail = spendHist.slice(-3);
     const avg = tail.reduce((s, v) => s + v, 0) / Math.min(spendHist.length, 3);
-    if (coastYear === null && row.liquid_net_worth >= 4 * avg) {
+    if (coastYear === null && row.liquid_net_worth >= a.coast_multiple * avg) {
       coastYear = y;
     }
   }

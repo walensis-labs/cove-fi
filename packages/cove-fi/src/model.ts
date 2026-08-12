@@ -171,6 +171,13 @@ export interface Plan {
 
 export const COAST = -1;
 
+// Sentinel for Income.end: "follow the scenario's retirement_year" instead
+// of a fixed year. Resolved by engine.run() to `retirement_year - 1` under
+// EFFECTIVE assumptions (i.e. after scenario overrides merge), so a
+// retirement-year what-if moves this income's end date automatically.
+// Valid ONLY on Income.end — planFromJson rejects it anywhere else.
+export const RETIREMENT = -2;
+
 /**
  * Fill Python-dataclass defaults for every optional field, so JSON plans
  * that omit fields behave exactly like Python instances constructed with
