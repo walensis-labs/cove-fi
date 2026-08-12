@@ -31,12 +31,11 @@ Full walkthrough, MCP setup, and command reference:
 
 Wire up the MCP server (see [`docs/clients/`](./docs/clients) for
 Claude Desktop, Claude Code, and Cursor setup), then just say "set up my
-retirement plan." In clients that surface MCP prompts, that
-invokes the `onboard` prompt — a guided interview that checks for existing
-plans, offers YNAB seeding, walks you through the rest by hand, and
-finishes with a projection, a Monte Carlo run, and a save. In clients that
-don't surface prompts, saying the same words works too — the tools
-self-describe and the model can drive the same flow.
+retirement plan." Clients that surface MCP prompts can run the `onboard`
+guided flow directly; everywhere else, just asking works — the tools are
+self-describing. Either path checks for existing plans, offers YNAB
+seeding, walks you through the rest by hand, and finishes with a
+projection, a Monte Carlo run, and a save.
 
 Plans are discovered from `~/.cove-fi/plans` (override with
 `COVE_FI_PLANS`). YNAB seeding (via `@walensis/ynab-client`) needs
@@ -68,7 +67,10 @@ citations, and an honest accounting of current limitations.
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
-- **0.3** — integrations (third-party import/export), portfolio mixes
+- **0.3** — conversational onboarding (guided interview, plan discovery,
+  propose-only YNAB seeding). **Shipped.**
+- **0.4** — integrations (third-party import/export), bond
+  series/portfolio mixes
 
 ## License
 

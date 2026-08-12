@@ -13,10 +13,9 @@ Start a new session and ask Claude to load a plan file with `load_plan`
 
 ## Onboarding
 
-Claude Code exposes MCP prompts as slash commands
-(`/mcp__cove-fi__onboard`), or just type "set up my retirement plan" in
-the chat — Claude will invoke the `onboard` prompt (or drive the same
-flow tool-by-tool if the prompt isn't available) either way.
+Run `/mcp__cove-fi__onboard` for the guided flow, or just type "set up my
+retirement plan" — Claude drives the same flow through the tools
+directly.
 
 ## Example prompts
 

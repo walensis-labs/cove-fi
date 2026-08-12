@@ -22,9 +22,9 @@ Open a new chat and confirm the hammer/tools icon lists `cove-fi`'s tools
 
 ## Onboarding
 
-Claude Desktop surfaces MCP prompts through the `+` / prompts picker next
-to the message box — pick `cove-fi`'s `onboard` prompt there, or just type
-"set up my retirement plan" in the chat to invoke it directly.
+Pick `onboard` from the prompts menu for the guided flow, or just type
+"set up my retirement plan" — the assistant drives the same flow through
+the tools.
 
 ## Example prompts
 

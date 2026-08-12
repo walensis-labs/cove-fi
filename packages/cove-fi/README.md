@@ -104,15 +104,13 @@ Setup is a one-liner per client:
 
 ## Onboarding
 
-Once the server's wired up, just say **"set up my retirement plan."** In
-clients that surface MCP prompts (like Claude Desktop's `+` / prompts
-picker), that phrase invokes the `onboard` prompt — a guided interview
-that checks `list_plans` for an existing plan, offers to seed a starting
-point from YNAB, walks a manual interview for anything seeding didn't
-cover, and finishes with `run_projection`, `fi_status`, a `monte_carlo`
-run, and a `save_plan`. In clients that don't surface prompts, saying the
-same words still works — every tool's description is self-explanatory
-enough for the model to drive the same flow without the prompt.
+Once the server's wired up, just say **"set up my retirement plan."**
+Clients that surface MCP prompts can run the `onboard` guided flow
+directly; everywhere else, just asking works — the tools are
+self-describing. Either path checks `list_plans` for an existing plan,
+offers to seed a starting point from YNAB, walks a manual interview for
+anything seeding didn't cover, and finishes with `run_projection`,
+`fi_status`, a `monte_carlo` run, and a `save_plan`.
 
 Plans are discovered from `~/.cove-fi/plans` (override with the
 `COVE_FI_PLANS` environment variable) — `list_plans` also picks up any
