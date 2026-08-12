@@ -20,6 +20,12 @@ Open a new chat and confirm the hammer/tools icon lists `cove-fi`'s tools
 (`load_plan`, `run_projection`, `fi_status`, `run_scenario`,
 `compare_scenarios`, ...).
 
+## Onboarding
+
+Claude Desktop surfaces MCP prompts through the `+` / prompts picker next
+to the message box — pick `cove-fi`'s `onboard` prompt there, or just type
+"set up my retirement plan" in the chat to invoke it directly.
+
 ## Example prompts
 
 - "Load my-plan.toml and tell me if I'm on track. Then try retirement at 57

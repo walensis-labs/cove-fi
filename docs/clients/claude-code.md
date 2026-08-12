@@ -11,6 +11,13 @@ connected with `claude mcp list` — `cove-fi` should show as `connected`.
 Start a new session and ask Claude to load a plan file with `load_plan`
 (or just describe your situation and let it call the tool).
 
+## Onboarding
+
+Claude Code exposes MCP prompts as slash commands
+(`/mcp__cove-fi__onboard`), or just type "set up my retirement plan" in
+the chat — Claude will invoke the `onboard` prompt (or drive the same
+flow tool-by-tool if the prompt isn't available) either way.
+
 ## Example prompts
 
 - "Load my-plan.toml and tell me if I'm on track. Then try retirement at 57

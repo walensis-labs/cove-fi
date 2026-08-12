@@ -1,10 +1,14 @@
 # cove-fi
 
-A deterministic, annual retirement / financial-independence projection
-engine — plan files in, a year-by-year net-worth projection out, with a CLI
-and an MCP server so you can run it from a terminal or just talk to it from
-Claude Desktop, Claude Code, or Cursor. It's the **Project** module of the
-Cove suite (Balance → Plan → **Project**), but works entirely standalone.
+Cove FI (`@walensis/cove-fi`) is a deterministic, annual retirement /
+financial-independence projection engine — plan files in, a year-by-year
+net-worth projection out, with a CLI and an MCP server so you can run it
+from a terminal or just talk to it from Claude Desktop, Claude Code, or
+Cursor. It's the **Project** module of the Cove suite (Balance → Plan →
+**Project**), but works entirely standalone.
+
+Cove for YNAB manages this month's money; Cove FI projects the next forty
+years. Each works alone; together they talk.
 
 ## Quickstart
 
@@ -22,6 +26,25 @@ it ends automatically the year before `retirement_year` — including under a
 
 Full walkthrough, MCP setup, and command reference:
 [`packages/cove-fi/README.md`](./packages/cove-fi/README.md).
+
+## Onboarding
+
+Wire up the MCP server (see [`docs/clients/`](./docs/clients) for
+Claude Desktop, Claude Code, and Cursor setup), then just say "set up my
+retirement plan." In clients that surface MCP prompts, that
+invokes the `onboard` prompt — a guided interview that checks for existing
+plans, offers YNAB seeding, walks you through the rest by hand, and
+finishes with a projection, a Monte Carlo run, and a save. In clients that
+don't surface prompts, saying the same words works too — the tools
+self-describe and the model can drive the same flow.
+
+Plans are discovered from `~/.cove-fi/plans` (override with
+`COVE_FI_PLANS`). YNAB seeding (via `@walensis/ynab-client`) needs
+`COVE_FI_YNAB_TOKEN` or `YNAB_TOKEN` set to a YNAB Personal Access Token;
+without one, `seed_from_ynab` just says so instead of erroring. Seeding is
+always **propose-only** — it never writes to your plan on its own, it
+returns numbers for you to confirm before they go into `create_plan` or
+`update_plan`.
 
 ## Docs
 

@@ -1,16 +1,20 @@
 # @walensis/cove-fi
 
-A deterministic, annual retirement / financial-independence projection
-engine. Give it a plan file (accounts, income, expenses, contributions,
-Social Security, a house if you have one) and it projects net worth,
-income, expenses, taxes, and withdrawals year by year to see when you hit
-FI, when you could coast, and whether your money outlives you.
+Cove FI (`@walensis/cove-fi`) is a deterministic, annual retirement /
+financial-independence projection engine. Give it a plan file (accounts,
+income, expenses, contributions, Social Security, a house if you have one)
+and it projects net worth, income, expenses, taxes, and withdrawals year by
+year to see when you hit FI, when you could coast, and whether your money
+outlives you.
 
-`cove-fi` is the **Project** module of the Cove suite (Balance → Plan →
+Cove FI is the **Project** module of the Cove suite (Balance → Plan →
 **Project**), but it's fully standalone — no other Cove tools required. It
 ships as a CLI, a library, and an MCP server, so you can run it from a
 terminal, script against it, or just talk to it from Claude Desktop, Claude
 Code, or Cursor.
+
+Cove for YNAB manages this month's money; Cove FI projects the next forty
+years. Each works alone; together they talk.
 
 The engine is grounded in research: its default assumptions aren't picked
 for elegance, they're cited from published sources and IRS tables (see
@@ -72,15 +76,22 @@ instead of starting from the bare template.
 
 ## Use it from an AI assistant (MCP)
 
-`cove-fi mcp` starts a stdio MCP server exposing eight tools (`load_plan`,
-`get_assumptions`, `set_assumption`, `run_projection`, `fi_status`,
-`run_scenario`, `monte_carlo`, `compare_scenarios`) so you can talk
-through your plan in plain language instead of memorizing CLI flags —
+`cove-fi mcp` starts a stdio MCP server exposing thirteen tools so you can
+talk through your plan in plain language instead of memorizing CLI flags —
 "try retiring at 57", "what if Social Security gets cut 25%", "compare 60
-vs 65", "what's my success rate over 1000 simulations". As with the CLI
-`scenario` command, `run_scenario`'s `retirement_year` override moves any
-income whose `end = "retirement"` right along with it — no separate plan
-edit needed.
+vs 65", "what's my success rate over 1000 simulations":
+
+- **Plan discovery & building:** `list_plans`, `load_plan` (bare saved-plan
+  names or a path), `create_plan`, `update_plan`, `save_plan`
+- **YNAB seeding:** `seed_from_ynab` (propose-only)
+- **Assumptions:** `get_assumptions` (returns `{ assumptions, citations }`),
+  `set_assumption`
+- **Projection:** `run_projection`, `fi_status`, `run_scenario`,
+  `monte_carlo`, `compare_scenarios`
+
+As with the CLI `scenario` command, `run_scenario`'s `retirement_year`
+override moves any income whose `end = "retirement"` right along with it —
+no separate plan edit needed.
 
 Setup is a one-liner per client:
 
@@ -90,6 +101,28 @@ Setup is a one-liner per client:
   [`docs/clients/claude-desktop.md`](../../docs/clients/claude-desktop.md)
 - **Cursor:** add a block to `.cursor/mcp.json` — see
   [`docs/clients/cursor.md`](../../docs/clients/cursor.md)
+
+## Onboarding
+
+Once the server's wired up, just say **"set up my retirement plan."** In
+clients that surface MCP prompts (like Claude Desktop's `+` / prompts
+picker), that phrase invokes the `onboard` prompt — a guided interview
+that checks `list_plans` for an existing plan, offers to seed a starting
+point from YNAB, walks a manual interview for anything seeding didn't
+cover, and finishes with `run_projection`, `fi_status`, a `monte_carlo`
+run, and a `save_plan`. In clients that don't surface prompts, saying the
+same words still works — every tool's description is self-explanatory
+enough for the model to drive the same flow without the prompt.
+
+Plans are discovered from `~/.cove-fi/plans` (override with the
+`COVE_FI_PLANS` environment variable) — `list_plans` also picks up any
+`*.toml` files in your current directory. `seed_from_ynab` reads a YNAB
+budget through [`@walensis/ynab-client`](https://www.npmjs.com/package/@walensis/ynab-client)
+and needs `COVE_FI_YNAB_TOKEN` or `YNAB_TOKEN` set to a YNAB Personal
+Access Token; without one it returns `{ configured: false, instructions }`
+instead of erroring. Seeding is always **propose-only** — it never writes
+to the loaded plan itself, only returns numbers for the assistant to read
+back and confirm with you before they go into `create_plan`/`update_plan`.
 
 ## Validation status
 
