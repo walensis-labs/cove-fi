@@ -29,6 +29,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.30.0(zod@3.25.76)
+      '@walensis/ynab-client':
+        specifier: ^0.1.0
+        version: 0.1.0
       commander:
         specifier: ^12.0.0
         version: 12.1.0
@@ -788,6 +791,9 @@ packages:
 
   '@vitest/utils@2.1.9':
     resolution: {integrity: sha512-v0psaMSkNJ3A2NMrUEHFRzJtDPFn+/VWZ5WxImB21T9fjucJRmS7xCS3ppEnARb9y11OAzaD+P2Ps+b+BGX5iQ==}
+
+  '@walensis/ynab-client@0.1.0':
+    resolution: {integrity: sha512-zfR01Gyq9pI++lUkw7NWpQN0J/R4/jpQsMrb5cTSnG6FxMbhvd9ecHEQtUA4dX/Q86iKcCxbx+Ne2/RResiGnQ==}
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -2308,6 +2314,8 @@ snapshots:
       '@vitest/pretty-format': 2.1.9
       loupe: 3.2.1
       tinyrainbow: 1.2.0
+
+  '@walensis/ynab-client@0.1.0': {}
 
   accepts@2.0.0:
     dependencies:

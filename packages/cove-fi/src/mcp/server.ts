@@ -18,6 +18,7 @@ import { CITED_DEFAULTS } from "../defaults.js";
 import { type YearRow } from "../engine.js";
 import { type Assumptions, DEFAULT_ASSUMPTIONS } from "../model.js";
 import { listPlans, resolvePlanRef } from "../planstore.js";
+import { seedFromYnab } from "../seed/ynab.js";
 import { type FiStatus, Session } from "../session.js";
 import { thinIndices, thinMonteCarloResult, thinRows } from "../thin.js";
 
@@ -34,11 +35,14 @@ function toolError(err: unknown): CallToolResult {
   return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: message }) }] };
 }
 
-/** Wraps a handler body so any thrown Session/engine error becomes a
- * structured tool error instead of crashing the server. */
-function guarded(fn: () => unknown): CallToolResult {
+/** Wraps a handler body so any thrown Session/engine error (or rejected
+ * promise — `fn` may be sync or async, e.g. seed_from_ynab's network call)
+ * becomes a structured tool error instead of crashing the server. `await`
+ * on a non-promise value resolves immediately, so this stays a drop-in
+ * replacement for every pre-existing synchronous call site. */
+async function guarded(fn: () => unknown): Promise<CallToolResult> {
   try {
-    return toolOk(fn());
+    return toolOk(await fn());
   } catch (err) {
     return toolError(err);
   }
@@ -346,6 +350,20 @@ export function createServer(session: Session): McpServer {
         }
         return { years, series, deltas };
       }),
+  );
+
+  server.registerTool(
+    "seed_from_ynab",
+    {
+      description:
+        "PROPOSE-ONLY: reads a YNAB budget (via COVE_FI_YNAB_TOKEN or YNAB_TOKEN) and returns a " +
+        "proposed starting point — spending by category group, detected income, and an estimated " +
+        "savings rate over the last 6 complete months. Never touches the loaded plan; the caller " +
+        "must confirm with the user and pass values into create_plan/update_plan by hand. If no " +
+        "token is set, returns `{ configured: false, instructions }` (not an error).",
+      inputSchema: { budget_id: z.string().optional() },
+    },
+    ({ budget_id }) => guarded(() => seedFromYnab(budget_id === undefined ? undefined : { budgetId: budget_id })),
   );
 
   server.registerPrompt(
