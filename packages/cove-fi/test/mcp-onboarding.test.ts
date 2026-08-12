@@ -118,5 +118,28 @@ describe("mcp onboarding/plan-building tools", () => {
     expect(lower).toContain("save_plan");
     expect(lower).toContain("monte_carlo");
     expect(lower).toContain("get_assumptions");
+    expect(lower).toContain("citations");
+    expect(lower).toContain("empty arrays for uncollected sections");
+  });
+
+  it("create_plan accepts income.end = \"retirement\" (universal sugar) and behaves as the RETIREMENT sentinel", async () => {
+    const plan = syntheticPlan();
+    plan.incomes = [{ ...plan.incomes[0]!, end: "retirement" as unknown as number }];
+    const summary = await call("create_plan", { plan });
+    expect(summary.incomes).toBe(1);
+    // Proof it behaves as the sentinel, not just that validation let the
+    // string slide through: run_projection succeeds (a raw string end would
+    // either fail validation above or poison arithmetic downstream).
+    const proj = await call("run_projection");
+    expect(proj.rows.length).toBeGreaterThan(0);
+  });
+
+  it("expense.end = \"retirement\" (string) is still rejected — the sugar is income.end-only", async () => {
+    const plan = syntheticPlan();
+    plan.expenses = [{ ...plan.expenses[0]!, end: "retirement" as unknown as number }];
+    const r = await client.callTool({ name: "create_plan", arguments: { plan } });
+    expect(r.isError).toBe(true);
+    const text = (r.content as { text: string }[])[0]!.text;
+    expect(text).toMatch(/end must be a number/i);
   });
 });

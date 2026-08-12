@@ -14,6 +14,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { CITED_DEFAULTS } from "../defaults.js";
 import { type YearRow } from "../engine.js";
 import { type Assumptions, DEFAULT_ASSUMPTIONS } from "../model.js";
 import { listPlans, resolvePlanRef } from "../planstore.js";
@@ -82,6 +83,13 @@ function roundFiStatus(fi: FiStatus): FiStatus {
 // ---------------------------------------------------------------------
 
 const ASSUMPTIONS_KEYS = Object.keys(DEFAULT_ASSUMPTIONS) as [keyof Assumptions, ...(keyof Assumptions)[]];
+
+// get_assumptions pairs each assumption with its citation where one
+// exists (CITED_DEFAULTS is a strict subset of Assumptions' keys — e.g.
+// retirement_year/start_year have no citation and are simply absent here).
+const ASSUMPTION_CITATIONS: Record<string, string> = Object.fromEntries(
+  CITED_DEFAULTS.map((d) => [d.key, d.source]),
+);
 
 // Explicit shapes (not a z.record(z.unknown()) passthrough): the engine
 // has no validation of its own for extra_expenses/extra_incomes — a
@@ -226,11 +234,15 @@ export function createServer(session: Session): McpServer {
 
   server.registerTool(
     "get_assumptions",
-    { description: "Return the loaded plan's assumptions.", inputSchema: {} },
+    {
+      description:
+        "Return the loaded plan's assumptions, plus a `citations` map (assumption key -> source justification) for the ones that have one.",
+      inputSchema: {},
+    },
     () =>
       guarded(() => {
         if (!session.plan) throw new Error("no plan loaded — call load_plan first");
-        return session.plan.assumptions;
+        return { assumptions: session.plan.assumptions, citations: ASSUMPTION_CITATIONS };
       }),
   );
 
@@ -360,22 +372,23 @@ const ONBOARD_PROMPT = `You are guiding the user through setting up a Cove FI re
 
 1. Check for existing plans. Call \`list_plans\`. If any are found, tell the user and offer to load one with \`load_plan\` before starting a new plan — don't assume they want to start over.
 
-2. Ask about YNAB. Ask whether the user tracks their finances in YNAB. If yes, call \`seed_from_ynab\` to get a proposed starting point (income, spending by category, estimated savings rate). Treat the result as a PROPOSAL: read it back to the user in plain, rounded numbers and get their confirmation before calling \`create_plan\` — never apply seeded numbers automatically. If this client also has budgeting tools you may have connected (a "Cove for YNAB"-style server, or similar), prefer those for richer category-level detail before falling back to \`seed_from_ynab\`.
+2. Ask about YNAB. First check whether this client also has budgeting tools you may have connected (a "Cove for YNAB"-style server, or similar) — if so, prefer those for richer category-level detail. Otherwise, ask whether the user tracks their finances in YNAB and, if yes, call \`seed_from_ynab\` to get a proposed starting point (income, spending by category, estimated savings rate). Either way, treat whatever comes back as a PROPOSAL only: read it back to the user in plain, rounded numbers and get their explicit confirmation before it goes into \`create_plan\`/\`update_plan\` — never apply seeded numbers automatically, from either source.
 
-3. If there's no YNAB data (or the user declines), run a manual interview in this fixed order, asking one section at a time:
+3. Run a manual interview to collect whatever seeding didn't cover (birth years, account balances, and contributions are never in the seed proposal — always ask for these; other sections may already be confirmed from step 2). Ask one section at a time, in this fixed order:
    - Household: who's included, and birth year(s).
-   - Accounts & balances: name, type (e.g. taxable/traditional/roth/cash), balance, and cost basis where relevant.
+   - Accounts & balances: name, \`tax\` (one of \`cash\`|\`taxable\`|\`trad\`|\`roth\`|\`hsa\`|\`529\`), balance, and cost basis where relevant.
    - Income streams: source, amount, and timing.
    - Recurring expenses & housing.
    - Contributions & savings rungs (what gets funded, in what order).
-   - Retirement intent: when income should stop — set \`income.end = "retirement"\` for income that ends at retirement rather than a hardcoded year.
-   - Assumptions: call \`get_assumptions\` and offer the defaults WITH their citations, letting the user override any of them.
+   - Retirement intent: when income should stop — set \`income.end = "retirement"\` for income that ends at retirement rather than a hardcoded year (this may also appear as the numeric sentinel \`-2\`).
 
-4. Build the plan iteratively as you go: start with \`create_plan\` once you have the first section, then \`update_plan\` (using \`add\`/\`set\`) after each subsequent section. After every update, read back a short PlanSummary (accounts, incomes, expenses, contributions, birth year, retirement year) so the user can confirm before you continue.
+4. Build the plan iteratively as you go: as soon as you have the household section, call \`create_plan\`, seeding empty arrays for uncollected sections and \`assumptions: {}\` so the plan exists early — then \`update_plan\` (using \`add\`/\`set\`) after each subsequent section. After every update, read back a short PlanSummary: the counts (accounts, incomes, expenses, contributions) plus \`annual_gross_income\` and \`annual_expenses\` — confirm those two figures with the user before you continue.
 
-5. When the plan is complete, finish with: \`run_projection\`, then \`fi_status\`, then \`monte_carlo\` with 1000 trials. Present the resulting story in plain language (when they'd hit FI, how the Monte Carlo success rate looks), then call \`save_plan\` to persist it.
+5. Once a plan exists, call \`get_assumptions\` and offer its defaults WITH their citations (its \`citations\` field, keyed by assumption name) to the user, letting them override any value via \`set_assumption\` or \`update_plan\`'s \`set.assumptions\`.
 
-6. Never invent numbers — ask. Round dollar amounts when reading anything back to the user. Offer assumption defaults with their citations from \`get_assumptions\` rather than picking values yourself.`;
+6. When the plan is complete, finish with: \`run_projection\`, then \`fi_status\`, then \`monte_carlo\` with 1000 trials. \`monte_carlo\`'s dollar figures are NOMINAL (no today's-$ conversion is meaningful under sampled inflation); \`run_projection\`'s \`todays\` rows give today's-dollar equivalents if the user wants those. Present the resulting story in plain language (when they'd hit FI, how the Monte Carlo success rate looks), then ask the user what to name the plan and call \`save_plan\`. If \`save_plan\` errors because that name already exists, confirm with the user before retrying with \`overwrite: true\` — never overwrite silently.
+
+7. Never invent numbers — ask. Round dollar amounts when reading anything back to the user. Offer assumption defaults with their citations from \`get_assumptions\` rather than picking values yourself.`;
 
 export async function runStdio(): Promise<void> {
   const server = createServer(new Session());

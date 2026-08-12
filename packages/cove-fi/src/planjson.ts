@@ -54,11 +54,28 @@ function endBeforeStart(start: unknown, end: unknown, sentinels: readonly number
   return end < start;
 }
 
+/** `income.end = "retirement"` (case-sensitive) -> the RETIREMENT (-2)
+ * sentinel, applied universally (every `planFromJson` caller — JSON/MCP
+ * included, not just the TOML path) BEFORE the isNum check below, so the
+ * string is accepted rather than rejected as "must be a number". Every
+ * other `incomes[]` field, and every other field's `"retirement"` string
+ * (e.g. `expenses[].end`), passes through untouched and still fails
+ * validation. planfile.ts keeps its own TOML-level mapping too (harmless
+ * redundancy — it runs before this one on that path). */
+function mapRetirementStrings(incomes: unknown): unknown {
+  if (!Array.isArray(incomes)) return incomes;
+  return incomes.map((raw) => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
+    const income = raw as Record<string, unknown>;
+    return income.end === "retirement" ? { ...income, end: RETIREMENT } : income;
+  });
+}
+
 export function planFromJson(data: unknown): Plan {
   if (!isObj(data)) {
     throw new PlanValidationError(["plan must be a JSON object"]);
   }
-  const d = data;
+  const d: Record<string, unknown> = { ...data, incomes: mapRetirementStrings(data.incomes) };
   const issues: string[] = [];
 
   if (!isNum(d.birth_year)) issues.push("birth_year must be a number");
@@ -259,5 +276,5 @@ export function planFromJson(data: unknown): Plan {
     throw new PlanValidationError(issues);
   }
 
-  return normalizePlan(data as unknown as Plan);
+  return normalizePlan(d as unknown as Plan);
 }

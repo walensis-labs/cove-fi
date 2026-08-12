@@ -73,13 +73,18 @@ describe("mcp server", () => {
     const r = await client.callTool({ name: "set_assumption", arguments: { key: "bogus_key", value: 1 } });
     expect(r.isError).toBe(true);
   });
-  it("get_assumptions returns the loaded plan's assumptions, including a value changed via set_assumption", async () => {
+  it("get_assumptions returns { assumptions, citations }: assumptions include a value changed via set_assumption, citations come from CITED_DEFAULTS only", async () => {
     await call("load_plan", { path: planPath });
     await call("set_assumption", { key: "ret", value: 0.42 });
     const a = await call("get_assumptions");
-    expect(a.ret).toBe(0.42);
-    expect(a).toHaveProperty("retirement_year");
-    expect(a).toHaveProperty("inflation");
+    expect(a.assumptions.ret).toBe(0.42);
+    expect(a.assumptions).toHaveProperty("retirement_year");
+    expect(a.assumptions).toHaveProperty("inflation");
+    expect(a.citations.ret).toMatch(/S&P/);
+    expect(a.citations.inflation).toMatch(/CPI/);
+    // retirement_year has no entry in CITED_DEFAULTS — it must be absent,
+    // not fabricated.
+    expect(a.citations).not.toHaveProperty("retirement_year");
   });
   it("run_scenario rejects an extra_expenses entry missing `amount` as a structured error, not a NaN-riddled projection", async () => {
     await call("load_plan", { path: planPath });
