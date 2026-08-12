@@ -1,6 +1,6 @@
 {
   "name": "@walensis/cove-fi",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Retirement/FI projection engine — deterministic annual simulator with plan files, CLI, and MCP server. The Project module of the Cove suite.",
   "type": "module",
   "license": "MIT",
