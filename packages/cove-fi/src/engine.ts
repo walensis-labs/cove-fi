@@ -52,8 +52,12 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
       byYear.set(r.year, r);
     }
     for (let y = a.start_year; y <= a.end_year; y++) {
-      if (!byYear.has(y)) {
+      const r = byYear.get(y);
+      if (!r) {
         throw new Error(`rates schedule must cover ${a.start_year}..${a.end_year}`);
+      }
+      if (!Number.isFinite(r.ret) || !Number.isFinite(r.inflation)) {
+        throw new Error("rates schedule contains non-finite values");
       }
     }
     rateFor = (y: number) => {
@@ -79,7 +83,11 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
   const rows: YearRow[] = [];
   const lastWorkYear = a.retirement_year - 1;
   let f = 1.0;
-  const expGrow = plan.expenses.map(() => 1.0);
+  const expGrow = plan.expenses.map((e) =>
+    e.nominal_at_start && e.start < a.start_year
+      ? (1 + a.inflation + (e.growth_over_inflation ?? 0)) ** (a.start_year - e.start - 1)
+      : 1.0,
+  );
 
   for (let y = a.start_year; y <= a.end_year; y++) {
     if (y > a.start_year) {
