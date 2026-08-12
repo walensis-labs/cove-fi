@@ -191,7 +191,10 @@ export class Session {
 
   /** Resolves the named overlay exactly like runProjection (applyOverrides),
    * then runs the block-bootstrap Monte Carlo over the modified plan.
-   * Nominal-dollar only — see montecarlo.ts; no today's-$ conversion here. */
+   * Nominal-dollar only — see montecarlo.ts; no today's-$ conversion here.
+   * Note: ret/inflation scenario overrides are ignored — per-year rates come
+   * from sampled market history; retirement_year, savings, social-security,
+   * and extra income/expense overrides all apply. */
   monteCarlo(scenario?: string, trials = 1000, seed?: number): MonteCarloResult {
     const plan = this.requirePlan();
     const overlay = this.resolveOverlay(scenario);

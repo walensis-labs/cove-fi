@@ -58,7 +58,7 @@ name = "salary"
 amount = 150000
 start = 2026
 end = "retirement" # ends automatically the year before assumptions.retirement_year (2060)
-reduces_by_pretax = true
+reduces_by_pretax = true # reserved — has no effect yet; pretax rungs already reduce the tax base automatically (see docs/SEMANTICS.md)
 
 [[social_security]]
 pia_monthly = 2400

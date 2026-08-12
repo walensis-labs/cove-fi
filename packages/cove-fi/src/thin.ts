@@ -1,9 +1,9 @@
 /**
- * Row/percentile-series thinning shared by the MCP server (context-window
- * budget) and the CLI's `mc --json` output. Kept out of `mcp/server.ts` so
- * the CLI can reuse the exact same thinning/rounding without statically
- * importing the MCP SDK (only the `mcp` subcommand dynamically imports
- * `mcp/server.js` — see cli.ts).
+ * Row/percentile-series thinning for the MCP server's context-window
+ * budget (MCP-only — the CLI's `mc --json`/`run --json`/`compare --json`
+ * output is always full-resolution, untruncated). Kept out of
+ * `mcp/server.ts` as its own module so the thinning/rounding logic doesn't
+ * statically pull the MCP SDK into anything that imports it.
  *
  * Sampling rule: first 5 years, every 5th year thereafter, retirement year
  * +/-2, and the final year. Hard bound: never returns more than MAX_ROWS

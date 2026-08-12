@@ -9,6 +9,7 @@
  * the MCP protocol channel in stdio mode, so any diagnostic output must go
  * to stderr (`console.error`), never `console.log`.
  */
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -71,8 +72,9 @@ function roundFiStatus(fi: FiStatus): FiStatus {
 }
 
 // row/percentile thinning (run_projection, compare_scenarios' series, and
-// monte_carlo — full tables stay a CLI/--json concern) lives in ../thin.js,
-// shared with cli.ts's `mc --json` output.
+// monte_carlo — full tables stay a CLI/--json concern) lives in ../thin.js.
+// MCP-only: the CLI's `mc --json`/`run --json`/`compare --json` output is
+// always full-resolution, untruncated.
 
 // ---------------------------------------------------------------------
 // zod shapes
@@ -119,8 +121,23 @@ const scenarioOverridesShape = {
 // server
 // ---------------------------------------------------------------------
 
+// Two candidate depths: "../../package.json" is correct when this file runs
+// as source (src/mcp/server.ts, e.g. under vitest); "../package.json" is
+// correct when it runs from the built bundle, where tsup's code-splitting
+// places the dynamically-imported chunk directly in dist/ (flat, same
+// depth as dist/cli.js) rather than mirroring src/mcp/'s nesting.
+function readPackageVersion(): string {
+  const req = createRequire(import.meta.url);
+  try {
+    return req("../../package.json").version;
+  } catch {
+    return req("../package.json").version;
+  }
+}
+const PACKAGE_VERSION: string = readPackageVersion();
+
 export function createServer(session: Session): McpServer {
-  const server = new McpServer({ name: "cove-fi", version: "0.1.0" });
+  const server = new McpServer({ name: "cove-fi", version: PACKAGE_VERSION });
 
   server.registerTool(
     "load_plan",
@@ -200,7 +217,7 @@ export function createServer(session: Session): McpServer {
     "monte_carlo",
     {
       description:
-        "Run a block-bootstrap Monte Carlo simulation over the base plan or a named scenario; returns success rate and thinned, rounded percentile bands over net worth. Results are NOMINAL dollars — no today's-$ conversion is meaningful per-trial under sampled inflation.",
+        "Run a block-bootstrap Monte Carlo simulation over the base plan or a named scenario; returns success rate and thinned, rounded percentile bands over net worth. Results are NOMINAL dollars — no today's-$ conversion is meaningful per-trial under sampled inflation. Note: ret/inflation scenario overrides are ignored — per-year rates come from sampled market history; retirement_year, savings, social-security, and extra income/expense overrides all apply.",
       inputSchema: {
         scenario: z.string().optional(),
         trials: z.number().int().min(1).max(10_000).default(1000),

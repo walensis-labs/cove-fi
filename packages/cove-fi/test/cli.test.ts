@@ -245,4 +245,11 @@ describe("cli", () => {
     expect(exitCode).toBe(1);
     expect(err.join("\n")).toMatch(/^error:/);
   });
+
+  it("mc --seed abc exits nonzero without silently coercing to seed 0", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["mc", planPath, "--seed", "abc"]);
+    expect(exitCode).toBe(1);
+    expect(err.join("\n")).toMatch(/^error:/);
+  });
 });

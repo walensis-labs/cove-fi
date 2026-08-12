@@ -149,7 +149,7 @@ const HEADER = `# Cove FI plan file.
 # (accounts, incomes, expenses, contributions); [plan], [house], and
 # [assumptions] are single tables. See docs/ASSUMPTIONS.md for where each
 # assumption default comes from, and see docs/SEMANTICS.md (Sentinels) for
-# COAST_START / COAST_END semantics (a contribution rung with start = -1
+# the COAST (-1) sentinel (a contribution rung with start = -1
 # or end = -1 means "no fixed date; runs from/until the coast-fi
 # trigger"). An income's
 # \`end = "retirement"\` means "no fixed date either — end automatically the
@@ -158,7 +158,7 @@ const HEADER = `# Cove FI plan file.
 #
 # The "${SPENDING_SMILE_FLAG}" flag is reserved for a future retirement
 # spending curve (Blanchett 2014) and is OFF in this release — the engine
-# ignores it in 0.1.
+# ignores it in this release.
 `;
 
 /** Inject one comment line, pulled from CITED_DEFAULTS, above each assumption key that has a citation. Every regex targets a line dumpPlan(TEMPLATE_PLAN) is guaranteed to emit verbatim, so this stays parse-safe by construction. */

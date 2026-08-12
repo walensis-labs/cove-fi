@@ -15,6 +15,7 @@
  * `buildProgram` for tests has no side effects.
  */
 import { existsSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import type { YearRow } from "./engine.js";
@@ -29,6 +30,8 @@ export interface Io {
 const defaultIo: Io = { out: (s) => console.log(s) };
 
 const nf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+
+const PACKAGE_VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
 function fail(err: unknown): void {
   const msg = err instanceof Error ? err.message : String(err);
@@ -208,7 +211,7 @@ export function buildProgram(io: Io = defaultIo): Command {
   program
     .name("cove-fi")
     .description("Cove FI — retirement/FI projection engine")
-    .version("0.1.0")
+    .version(PACKAGE_VERSION)
     .option("--json", "output JSON instead of a table (run/scenario/compare)");
 
   program
@@ -344,6 +347,9 @@ export function buildProgram(io: Io = defaultIo): Command {
         // by design (ledger-noted) — validate here, before ever calling it.
         if (!Number.isInteger(opts.trials) || opts.trials < 1) {
           throw new Error(`invalid --trials "${opts.trials}" (must be a positive integer)`);
+        }
+        if (opts.seed !== undefined && !Number.isInteger(opts.seed)) {
+          throw new Error(`invalid --seed "${opts.seed}" (must be an integer)`);
         }
         const session = new Session();
         session.loadPlanFile(planPath);

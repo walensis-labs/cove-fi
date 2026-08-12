@@ -93,6 +93,14 @@ withdrawals; Social Security benefits are taxed on their
 `taxable_fraction` (default 0.85) once claimed and once working years have
 ended.
 
+Ordinary income tax on `Income` entries only applies in working years
+(`year <= retirement_year - 1`) — a known simplification. An `Income` with
+a fixed `end` past `retirement_year` (rather than `end = "retirement"`)
+keeps contributing to `gross`/`income` in retirement years but is not
+taxed there; only Social Security's `taxable_fraction` and drawdown
+withdrawals are taxed post-retirement (see Retirement drawdown order
+above).
+
 ## Retirement drawdown order
 
 Once a year is past `retirement_year - 1` (the last working year), the
@@ -136,6 +144,10 @@ expenses are, like any other surplus, spent rather than reinvested.
   to `retirement_year - 1`. A `--retirement-year` scenario override moves
   this income's end date automatically; the rest of `run()` never sees the
   sentinel.
+
+## Monte Carlo
+
+`ret`/`inflation` scenario overrides are ignored under Monte Carlo (`Session.monteCarlo`, the `mc` CLI command, and the `monte_carlo` MCP tool) — per-year rates come from the sampled block-bootstrap market history instead; `retirement_year`, savings, social-security, and extra income/expense overrides all still apply.
 
 ## Reserved fields (accepted, not yet wired)
 

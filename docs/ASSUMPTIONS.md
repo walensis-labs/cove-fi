@@ -7,7 +7,7 @@
 
 Every plan carries an `[assumptions]` table (`Assumptions` in
 `src/model.ts`); values below are `DEFAULT_ASSUMPTIONS`, used whenever a
-plan file omits a field. All are flat, single-number placeholders for 0.1 —
+plan file omits a field. All are flat, single-number placeholders currently —
 see [`docs/SEMANTICS.md`](./SEMANTICS.md) (tax model) for the seams
 planned to replace them (e.g. a real progressive-bracket `FlatTax`
 implementation).
@@ -26,7 +26,7 @@ implementation).
 Not cited above (household-specific, no universal default to justify):
 `start_year`, `end_year`, `first_year_fraction`, `retirement_year`.
 
-## Spending smile (reserved, OFF in 0.1)
+## Spending smile (reserved, OFF currently)
 
 `SPENDING_SMILE_FLAG` (`"spending_smile"`, `src/defaults.ts`) names a future
 flag for a non-flat retirement spending curve: Blanchett, David M. (2014),
