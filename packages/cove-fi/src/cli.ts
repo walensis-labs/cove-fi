@@ -21,7 +21,6 @@ import type { YearRow } from "./engine.js";
 import type { MonteCarloResult } from "./montecarlo.js";
 import { initTemplate } from "./planfile.js";
 import { type FiStatus, type ScenarioOverrides, Session } from "./session.js";
-import { thinMonteCarloResult } from "./thin.js";
 
 export interface Io {
   out: (s: string) => void;
@@ -338,7 +337,7 @@ export function buildProgram(io: Io = defaultIo): Command {
     .argument("<plan>", "path to plan TOML file")
     .option("--trials <n>", "number of trials", (v) => Number(v), 1000)
     .option("--seed <n>", "PRNG seed (omit for a random seed)", (v) => Number(v))
-    .option("--json", "output the full (thinned) result instead of a table")
+    .option("--json", "output the full result as JSON instead of a table")
     .action((planPath: string, opts: { trials: number; seed?: number; json?: boolean }, cmd: Command) => {
       try {
         // The raw runMonteCarlo/Session.monteCarlo path has no trials guard
@@ -350,8 +349,10 @@ export function buildProgram(io: Io = defaultIo): Command {
         session.loadPlanFile(planPath);
         const mc = session.monteCarlo(undefined, opts.trials, opts.seed);
         if (resolveJson(opts, cmd)) {
-          const retirementYear = session.fiStatus().retirement_year;
-          io.out(JSON.stringify(thinMonteCarloResult(mc, retirementYear)));
+          // Full-resolution, untruncated, unrounded — matches `run --json`/
+          // `compare --json` precedent. Thinning/rounding is an MCP-only
+          // context-window concern (mcp/server.ts's monte_carlo tool).
+          io.out(JSON.stringify(mc));
           return;
         }
         io.out(`Success rate: ${(mc.success_rate * 100).toFixed(1)}% (${mc.trials} trials, seed ${mc.seed})`);

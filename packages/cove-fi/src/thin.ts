@@ -13,7 +13,7 @@
 import type { YearRow } from "./engine.js";
 import type { MonteCarloResult } from "./montecarlo.js";
 
-export const MAX_ROWS = 30;
+const MAX_ROWS = 30;
 
 /** Evenly spaced downsample of a sorted, deduped index list to at most
  * `max` entries. Always keeps the first and last index. */
