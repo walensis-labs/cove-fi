@@ -143,12 +143,15 @@ describe("conventions", () => {
   });
 
   it("3: surplus is spent — income identity holds every working year", () => {
+    // One-sided guarantee only: surplus is always spent (cashFlowDefault:
+    // "spend"), so the income identity never runs positive. The negative-side
+    // bound (bounded working-year deficit wedge from timing effects like the
+    // 2035 nominal_at_start car expense) is the canonical assertion in
+    // test/validation/conservation.test.ts — see that file for the bound and
+    // its derivation; don't duplicate it here.
     for (const r of rows.filter((r) => r.year < plan.assumptions.retirement_year)) {
-      // positive side: surplus is always spent (income identity holds). negative side: working-year deficits
-      // from timing wedges (e.g., 2035 nominal_at_start car expense creates ~-$18.3k residual) are allowed.
       const resid = r.income - r.taxes - r.contributions - r.expenses;
       expect(resid, `year ${r.year}`).toBeLessThan(1);
-      expect(resid, `year ${r.year}`).toBeGreaterThan(-20_000);
     }
   });
 
