@@ -69,11 +69,18 @@ describe("examples/ — every starter plan parses and runs end-to-end", () => {
     });
   }
 
-  it("conventional-65: reaches FI (non-null fi_year)", () => {
+  it("conventional-65: does not reach FI under income-relative match (was 225k-base quirk)", () => {
+    // Pre-0.2.0 the engine matched 401k contributions against a fixed $225k
+    // base regardless of the plan's actual salary; this plan's salary is
+    // $140k, so the quirk inflated its employer match ~1.6x ($11,250/yr vs
+    // the correct $7,000/yr = 5% of $140k). That alone pushed peak
+    // liquid_net_worth/expenses from ~1.04x (crossing the 25x-expenses FI
+    // line in 2049) to ~0.95x (never crossing it). This is the expected,
+    // hand-derived consequence of removing the quirk — not a regression.
     const session = new Session();
     session.loadPlanFile(join(EXAMPLES_DIR, "conventional-65.toml"));
     const status = session.fiStatus();
-    expect(status.fi_year).not.toBeNull();
+    expect(status.fi_year).toBeNull();
   });
 
   it("early-52: reaches FI strictly before its own retirement_year", () => {

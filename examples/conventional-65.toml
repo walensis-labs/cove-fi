@@ -77,7 +77,7 @@ end = 2049
 to_limit = true # contribute the IRS max every year
 annual_limit_key = "401k"
 pretax = true
-employer_match_pct = 0.05 # 5% match — NOTE: the engine computes matches against a fixed $225k base (ProjectionLab-parity quirk), not this plan's salary; see early-52.toml header
+employer_match_pct = 0.05 # 5% match — matched 1:1 up to this % of household gross income
 
 [[contributions]]
 account = "roth"

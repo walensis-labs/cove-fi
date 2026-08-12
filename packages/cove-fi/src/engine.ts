@@ -115,9 +115,14 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
 
     // ---------- income ----------
     let gross = 0.0;
+    let taxableGross = 0.0;
     for (const i of plan.incomes) {
       if (i.start <= y && y <= i.end) {
-        gross += i.amount * f * frac;
+        const amt = i.amount * f * frac;
+        gross += amt;
+        if (i.taxable !== false) {
+          taxableGross += amt;
+        }
       }
     }
     let ssGross = 0.0;
@@ -178,7 +183,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
     let taxes: number;
     if (y <= lastWorkYear) {
       for (let iter = 0; iter < 4; iter++) {
-        taxes = Math.max(gross - pretax, 0.0) * ordRate;
+        taxes = Math.max(taxableGross - pretax, 0.0) * ordRate;
         let available = gross - taxes - exp;
         const newContribs: Map<string, number> = new Map();
         const newMatches: Map<string, number> = new Map();
@@ -194,25 +199,20 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
           }
           let want: number;
           if (c.to_limit && c.annual_limit_key) {
-            want = limits[c.annual_limit_key]!;
+            want = limits[c.annual_limit_key]! * frac;
           } else if (c.pct_of_income != null) {
             want = Math.min(
-              c.pct_of_income * 225_000 * f,
+              c.pct_of_income * gross,
               c.annual_limit_key != null ? (limits[c.annual_limit_key] ?? 1e18) : 1e18,
             );
           } else {
-            want = c.amount! * f;
+            want = c.amount! * f * frac;
           }
-          want *= frac;
           const amt = Math.max(Math.min(want, available), 0.0);
           available -= amt;
           let m = 0.0;
           if (c.employer_match_pct) {
-            m =
-              frac < 1
-                ? Math.min(c.employer_match_pct * 225_000 * f, amt) * frac
-                : Math.min(c.employer_match_pct * 225_000 * f, want);
-            m = amt > 0 ? m : 0.0;
+            m = amt > 0 ? Math.min(amt, c.employer_match_pct * gross) : 0.0;
           }
           if (c.employer_match_flat) {
             m = amt > 0 ? c.employer_match_flat * f * frac : 0.0;
@@ -234,7 +234,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
         matches = newMatches;
         pretax = newPretax;
       }
-      taxes = Math.max(gross - pretax, 0.0) * ordRate;
+      taxes = Math.max(taxableGross - pretax, 0.0) * ordRate;
       let contribSum = 0.0;
       for (const v of contribs.values()) {
         contribSum += v;

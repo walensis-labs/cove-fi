@@ -84,7 +84,7 @@ end = -1
 to_limit = true
 annual_limit_key = "401k"
 pretax = true
-employer_match_pct = 0.04 # matches against a fixed $225k base (engine quirk), not this plan's $150k salary — see early-52.toml header
+employer_match_pct = 0.04 # matched 1:1 up to this % of household gross income
 
 [[contributions]]
 # Post-coast: dial 401k down to just enough to keep the employer match
