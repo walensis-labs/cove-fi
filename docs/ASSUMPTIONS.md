@@ -7,17 +7,18 @@
 
 Every plan carries an `[assumptions]` table (`Assumptions` in
 `src/model.ts`); values below are `DEFAULT_ASSUMPTIONS`, used whenever a
-plan file omits a field. All are flat, single-number placeholders for 0.1 —
-see the design doc for the seams planned to replace them (e.g. a real
-progressive-bracket `FlatTax` implementation, §5).
+plan file omits a field. All are flat, single-number placeholders currently —
+see [`docs/SEMANTICS.md`](./SEMANTICS.md) (tax model) for the seams
+planned to replace them (e.g. a real progressive-bracket `FlatTax`
+implementation).
 
 | Key | Default | Unit | Source |
 |---|---|---|---|
 | `inflation` | 0.03 | annual rate | long-run US CPI ~2.9% 1926-2024; Fed target 2% + margin |
 | `ret` | 0.07 | annual nominal rate | nominal; ~10% S&P long-run minus dilution/fees, conservative |
 | `dividend_rate` | 0.015 | annual rate of taxable balances | S&P trailing yield 2024-2026 range |
-| `income_tax` | 0.30 | flat effective rate | flat effective placeholder - FlatTax seam, see design §5 |
-| `local_tax` | 0.01 | flat effective rate | flat effective placeholder - FlatTax seam, see design §5 |
+| `income_tax` | 0.30 | flat effective rate | flat effective placeholder - FlatTax seam, see docs/SEMANTICS.md (tax model) |
+| `local_tax` | 0.01 | flat effective rate | flat effective placeholder - FlatTax seam, see docs/SEMANTICS.md (tax model) |
 | `cap_gains_tax` | 0.15 | flat effective rate | US LTCG middle bracket |
 | `coast_multiple` | 4.0 | x trailing spend | 4% rule, Trinity study; coast = 4x trailing spend heuristic |
 | `fi_multiple` | 25.0 | x annual spend | 4% rule, Trinity study (1/0.04 = 25) |
@@ -25,7 +26,7 @@ progressive-bracket `FlatTax` implementation, §5).
 Not cited above (household-specific, no universal default to justify):
 `start_year`, `end_year`, `first_year_fraction`, `retirement_year`.
 
-## Spending smile (reserved, OFF in 0.1)
+## Spending smile (reserved, OFF currently)
 
 `SPENDING_SMILE_FLAG` (`"spending_smile"`, `src/defaults.ts`) names a future
 flag for a non-flat retirement spending curve: Blanchett, David M. (2014),
@@ -33,5 +34,5 @@ flag for a non-flat retirement spending curve: Blanchett, David M. (2014),
 spending tends to decline through the "go-go"/"slow-go" retirement years
 and rise again late in life with healthcare costs (the "spending smile").
 The flag is reserved but **OFF by default** in this release — the engine
-ignores it and projects flat real spending, matching the ProjectionLab
-parity baseline (see `docs/CALIBRATION.md`).
+ignores it and projects flat real spending; see
+[`docs/VALIDATION.md`](./VALIDATION.md) for why.

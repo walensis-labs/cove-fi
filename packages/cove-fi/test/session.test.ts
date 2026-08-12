@@ -200,6 +200,36 @@ describe("Session — error paths", () => {
   });
 });
 
+describe("Session — monteCarlo", () => {
+  it("fixed seed => identical results across two calls", () => {
+    const session = new Session();
+    session.plan = syntheticPlan();
+    const r1 = session.monteCarlo(undefined, 50, 7);
+    const r2 = session.monteCarlo(undefined, 50, 7);
+    expect(r1).toEqual(r2);
+  });
+
+  it("a scenario overlay changes the result vs the base plan", () => {
+    const session = new Session();
+    session.plan = syntheticPlan();
+    session.defineScenario("later", { retirement_year: 2055 });
+    const base = session.monteCarlo(undefined, 50, 7);
+    const later = session.monteCarlo("later", 50, 7);
+    expect(later).not.toEqual(base);
+  });
+
+  it("throws a clear error when no plan is loaded", () => {
+    const session = new Session();
+    expect(() => session.monteCarlo()).toThrowError(/no plan loaded/i);
+  });
+
+  it("throws a clear error for an unknown scenario name", () => {
+    const session = new Session();
+    session.plan = syntheticPlan();
+    expect(() => session.monteCarlo("does-not-exist")).toThrowError(/scenario/i);
+  });
+});
+
 describe("Session — compareScenarios", () => {
   it("computes deltas relative to the FIRST name in names", () => {
     const session = new Session();

@@ -69,11 +69,18 @@ describe("examples/ — every starter plan parses and runs end-to-end", () => {
     });
   }
 
-  it("conventional-65: reaches FI (non-null fi_year)", () => {
+  it("conventional-65: reaches FI (non-null fi_year) at or before its own retirement_year", () => {
+    // Under 0.2.0's income-relative match/tax rules, this plan's original
+    // $140k salary left almost no cash-flow headroom to fund any
+    // contribution rung beyond a partial 401k match, so it never reached
+    // FI (see the file's header comment for the hand-derived $15k salary
+    // rebalance that restores the intended "conventional household reaches
+    // FI right around retirement" story).
     const session = new Session();
     session.loadPlanFile(join(EXAMPLES_DIR, "conventional-65.toml"));
     const status = session.fiStatus();
     expect(status.fi_year).not.toBeNull();
+    expect(status.fi_year!).toBeLessThanOrEqual(status.retirement_year);
   });
 
   it("early-52: reaches FI strictly before its own retirement_year", () => {

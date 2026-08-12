@@ -203,4 +203,53 @@ describe("cli", () => {
     expect(err.join("\n")).toMatch(/^error:/);
     expect(err.join("\n")).not.toMatch(/at .*\.ts:\d+/); // no stack trace lines
   });
+
+  it("mc prints a success-rate line and a p50 row", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { out, exitCode } = await runCli(["mc", planPath, "--trials", "25", "--seed", "7"]);
+    expect(exitCode).toBeUndefined();
+    const text = out.join("\n");
+    expect(text).toMatch(/success/i);
+    expect(text).toMatch(/p50/i);
+  });
+
+  it("mc --json parses with success_rate/trials/seed/years/percentiles, full resolution (not thinned)", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { out, exitCode } = await runCli(["mc", planPath, "--trials", "25", "--seed", "7", "--json"]);
+    expect(exitCode).toBeUndefined();
+    expect(out.length).toBe(1);
+    const parsed = JSON.parse(out[0]!);
+    expect(typeof parsed.success_rate).toBe("number");
+    expect(parsed.trials).toBe(25);
+    expect(parsed.seed).toBe(7);
+    expect(Array.isArray(parsed.years)).toBe(true);
+    expect(Array.isArray(parsed.percentiles.p50)).toBe(true);
+    // Full-resolution, untruncated — matches `run --json`/`compare --json`
+    // precedent. Thinning to <=30 rows is an MCP-only context-window concern.
+    const plan = syntheticPlan();
+    const expectedYears = plan.assumptions.end_year - plan.assumptions.start_year + 1;
+    expect(parsed.years.length).toBe(expectedYears);
+    expect(parsed.percentiles.p50.length).toBe(expectedYears);
+  });
+
+  it("mc --trials 0 exits nonzero without calling the lib", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["mc", planPath, "--trials", "0"]);
+    expect(exitCode).toBe(1);
+    expect(err.join("\n")).toMatch(/^error:/);
+  });
+
+  it("mc --trials -5 exits nonzero", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["mc", planPath, "--trials", "-5"]);
+    expect(exitCode).toBe(1);
+    expect(err.join("\n")).toMatch(/^error:/);
+  });
+
+  it("mc --seed abc exits nonzero without silently coercing to seed 0", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["mc", planPath, "--seed", "abc"]);
+    expect(exitCode).toBe(1);
+    expect(err.join("\n")).toMatch(/^error:/);
+  });
 });

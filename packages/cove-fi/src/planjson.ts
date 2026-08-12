@@ -16,7 +16,7 @@
  *   - an expense's `fund_from` must name a real account for the same reason
  *     (engine indexes `bal[fund_from]` directly)
  */
-import { COAST, type Plan, type TaxType, normalizePlan } from "./model.js";
+import { COAST, type Plan, RETIREMENT, type TaxType, normalizePlan } from "./model.js";
 
 const TAX_TYPES: readonly TaxType[] = ["cash", "taxable", "trad", "roth", "hsa", "529"];
 const LIMIT_KEYS = new Set(["401k", "ira", "hsa_family"]);
@@ -45,11 +45,12 @@ function isObj(v: unknown): v is Record<string, unknown> {
 function isArr(v: unknown): v is unknown[] {
   return Array.isArray(v);
 }
-// end < start check that treats the COAST (-1) sentinel as "not a real
-// year" rather than as an earlier-than-everything date.
-function endBeforeStart(start: unknown, end: unknown, allowCoast: boolean): boolean {
+// end < start check that treats sentinel values (COAST = -1, RETIREMENT =
+// -2) as "not a real year" rather than as an earlier-than-everything date,
+// wherever the caller says that sentinel is legal for this field.
+function endBeforeStart(start: unknown, end: unknown, sentinels: readonly number[]): boolean {
   if (!isNum(start) || !isNum(end)) return false;
-  if (allowCoast && (start === COAST || end === COAST)) return false;
+  if (sentinels.includes(start) || sentinels.includes(end)) return false;
   return end < start;
 }
 
@@ -98,7 +99,10 @@ export function planFromJson(data: unknown): Plan {
     if (!isNum(raw.amount)) issues.push(`${label}.amount must be a number`);
     if (!isNum(raw.start)) issues.push(`${label}.start must be a number`);
     if (!isNum(raw.end)) issues.push(`${label}.end must be a number`);
-    if (endBeforeStart(raw.start, raw.end, false)) issues.push(`${label}: end (${raw.end}) is before start (${raw.start})`);
+    if (endBeforeStart(raw.start, raw.end, [RETIREMENT]))
+      issues.push(`${label}: end (${raw.end}) is before start (${raw.start})`);
+    if (raw.start === RETIREMENT)
+      issues.push(`${label}.start cannot be the RETIREMENT sentinel (-2) — RETIREMENT is only valid on income.end`);
     if (raw.taxable != null && !isBool(raw.taxable)) issues.push(`${label}.taxable must be a boolean`);
     if (raw.reduces_by_pretax != null && !isBool(raw.reduces_by_pretax))
       issues.push(`${label}.reduces_by_pretax must be a boolean`);
@@ -132,7 +136,9 @@ export function planFromJson(data: unknown): Plan {
     if (!isNum(raw.amount)) issues.push(`${label}.amount must be a number`);
     if (!isNum(raw.start)) issues.push(`${label}.start must be a number`);
     if (!isNum(raw.end)) issues.push(`${label}.end must be a number`);
-    if (endBeforeStart(raw.start, raw.end, false)) issues.push(`${label}: end (${raw.end}) is before start (${raw.start})`);
+    if (endBeforeStart(raw.start, raw.end, [])) issues.push(`${label}: end (${raw.end}) is before start (${raw.start})`);
+    if (raw.start === RETIREMENT || raw.end === RETIREMENT)
+      issues.push(`${label}: RETIREMENT sentinel (-2) is only valid on income.end`);
     if (raw.growth_over_inflation != null && !isNum(raw.growth_over_inflation))
       issues.push(`${label}.growth_over_inflation must be a number`);
     if (raw.nominal_at_start != null && !isBool(raw.nominal_at_start))
@@ -162,7 +168,10 @@ export function planFromJson(data: unknown): Plan {
     }
     if (!isNum(raw.start)) issues.push(`${label}.start must be a number`);
     if (!isNum(raw.end)) issues.push(`${label}.end must be a number`);
-    if (endBeforeStart(raw.start, raw.end, true)) issues.push(`${label}: end (${raw.end}) is before start (${raw.start})`);
+    if (endBeforeStart(raw.start, raw.end, [COAST]))
+      issues.push(`${label}: end (${raw.end}) is before start (${raw.start})`);
+    if (raw.start === RETIREMENT || raw.end === RETIREMENT)
+      issues.push(`${label}: RETIREMENT sentinel (-2) is only valid on income.end`);
     if (raw.amount != null && !isNum(raw.amount)) issues.push(`${label}.amount must be a number or null`);
     if (raw.pct_of_income != null && !isNum(raw.pct_of_income))
       issues.push(`${label}.pct_of_income must be a number or null`);

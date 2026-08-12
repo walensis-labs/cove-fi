@@ -12,11 +12,12 @@ ships as a CLI, a library, and an MCP server, so you can run it from a
 terminal, script against it, or just talk to it from Claude Desktop, Claude
 Code, or Cursor.
 
-The engine is grounded in actuals: its default assumptions and calculation
-order aren't picked for elegance, they're calibrated against a real
-household's retirement-planning software output (see [Calibration
-status](#calibration-status) below) and documented with citations in
-[`docs/ASSUMPTIONS.md`](../../docs/ASSUMPTIONS.md).
+The engine is grounded in research: its default assumptions aren't picked
+for elegance, they're cited from published sources and IRS tables (see
+[`docs/ASSUMPTIONS.md`](../../docs/ASSUMPTIONS.md)), and its behavior is
+checked against closed-form math, cross-plan invariants, and a Monte Carlo
+benchmark from the withdrawal-rate literature — see [Validation
+status](#validation-status) below.
 
 ## Quickstart (under 5 minutes)
 
@@ -55,12 +56,9 @@ and depletion year (if any). Try a scenario without touching the file:
 cove-fi scenario my-plan.toml --retirement-year 2048
 ```
 
-> **Note:** `--retirement-year` moves the simulation's work/retirement
-> boundary (contributions stop, drawdown starts) — it does not shorten any
-> income event's own `end` date. For a full early-retirement what-if,
-> shorten your salary income's `end` year in the plan too, so income
-> actually stops instead of continuing to be "earned" into the years you
-> just told the simulator you'd retired.
+Set an income's `end = "retirement"` (the scaffolded `salary` income already
+is) and it ends automatically the year before `retirement_year` — a
+`--retirement-year` scenario override moves it too, no separate edit needed.
 
 Other commands: `cove-fi check my-plan.toml` (validate without running),
 `cove-fi compare my-plan.toml --scenario "base:" --scenario
@@ -74,15 +72,15 @@ instead of starting from the bare template.
 
 ## Use it from an AI assistant (MCP)
 
-`cove-fi mcp` starts a stdio MCP server exposing seven tools (`load_plan`,
+`cove-fi mcp` starts a stdio MCP server exposing eight tools (`load_plan`,
 `get_assumptions`, `set_assumption`, `run_projection`, `fi_status`,
-`run_scenario`, `compare_scenarios`) so you can talk through your plan in
-plain language instead of memorizing CLI flags — "try retiring at 57",
-"what if Social Security gets cut 25%", "compare 60 vs 65". As with the CLI
-`scenario` command, `run_scenario`'s `retirement_year` override moves the
-work/retirement boundary only — it doesn't shorten income events' own `end`
-dates, so ask for (or make) that plan edit too when a what-if depends on
-income actually stopping.
+`run_scenario`, `monte_carlo`, `compare_scenarios`) so you can talk
+through your plan in plain language instead of memorizing CLI flags —
+"try retiring at 57", "what if Social Security gets cut 25%", "compare 60
+vs 65", "what's my success rate over 1000 simulations". As with the CLI
+`scenario` command, `run_scenario`'s `retirement_year` override moves any
+income whose `end = "retirement"` right along with it — no separate plan
+edit needed.
 
 Setup is a one-liner per client:
 
@@ -93,29 +91,26 @@ Setup is a one-liner per client:
 - **Cursor:** add a block to `.cursor/mcp.json` — see
   [`docs/clients/cursor.md`](../../docs/clients/cursor.md)
 
-## Calibration status
+## Validation status
 
-The engine is calibrated against a real household's ProjectionLab export
-(see [`docs/CALIBRATION.md`](../../docs/CALIBRATION.md) for the full
-methodology — the oracle data itself is private and never committed). Short
-version: **the accumulation phase is solid** (net worth and liquid net
-worth track the oracle within roughly 0.5–12%, withdrawals match exactly),
-but **retirement-phase drawdown still diverges substantially** — our
-withdrawal ordering and tax treatment during decumulation is the top open
-calibration item. Numbers from `cove-fi` for years before retirement are
-trustworthy as an estimate; numbers deep into retirement should be treated
-as rough until that's fixed. Track progress in
-[`docs/CALIBRATION.md`](../../docs/CALIBRATION.md).
+The engine is validated against published research and primary sources,
+not any particular commercial planning tool — closed-form math, cross-plan
+invariants, IRS-table pins, and a Monte Carlo benchmark against the
+Trinity-study withdrawal-rate literature. See
+[`docs/VALIDATION.md`](../../docs/VALIDATION.md) for the full methodology,
+citations, and an honest accounting of current limitations (flat effective
+tax model, single-asset Monte Carlo, no state tax/IRMAA). For the engine's
+actual rules — the contribution waterfall, drawdown order, sentinels — see
+[`docs/SEMANTICS.md`](../../docs/SEMANTICS.md).
 
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
-  instead of a single deterministic path.
-- **0.3** — ProjectionLab import adapter, so you can seed a plan from an
-  existing PL export instead of hand-writing TOML.
+  instead of a single deterministic path. **Shipped.**
+- **0.3** — integrations (third-party import/export), portfolio mixes.
 
-Not planned for 0.1.0: Monte Carlo, PL import (both above), or an npm
-publish beyond this initial release prep.
+Not yet: bond series/portfolio mixes, progressive-bracket taxes,
+third-party import/export integrations (targeted for 0.3).
 
 ## License
 

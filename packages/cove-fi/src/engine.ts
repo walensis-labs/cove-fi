@@ -1,16 +1,20 @@
 /**
  * Cove FI engine v0.2 — deterministic annual simulator.
  *
- * Calibration discoveries vs v0:
- *   * PL's contribution waterfall is CASH-FLOW CONSTRAINED: rungs fund in
+ * Core semantics (full detail in docs/SEMANTICS.md):
+ *   * The contribution waterfall is CASH-FLOW CONSTRAINED: rungs fund in
  *     priority order only while (income - taxes - explicit expenses) lasts.
+ *     No rung ever triggers a withdrawal from another account to fund
+ *     itself.
  *   * Leftover surplus is SPENT (cashFlowDefault: "spend") and lands in the
- *     Expenses metric.  Working years never trigger withdrawals.
+ *     Expenses metric. Working years never trigger withdrawals.
  *   * Pretax rungs (401k/HSA) reduce the tax base -> solved iteratively.
+ *   * Retirement drawdown order is fixed: taxable -> hsa -> trad -> roth
+ *     -> cash, with basis-proportional gains on taxable withdrawals.
  *
- * Ported from cove_fi/engine.py — line-by-line, exact operation order.
- * Parity beats taste here by explicit project decision; do not "improve"
- * any formula, including the trad-withdrawal tax gross-up spiral below.
+ * Do not "improve" a formula here without updating docs/SEMANTICS.md and
+ * its guarding tests in the same change — see docs/VALIDATION.md for how
+ * this engine's behavior is checked.
  */
 import {
   type Assumptions,
@@ -18,6 +22,7 @@ import {
   IRS_LIMITS_2026,
   normalizePlan,
   type Plan,
+  RETIREMENT,
   RMD_TABLE,
   type TaxType,
 } from "./model.js";
@@ -33,13 +38,44 @@ export interface YearRow {
   contributions: number;
 }
 
-export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
+export interface YearRates {
+  year: number;
+  ret: number;
+  inflation: number;
+}
+
+export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRates[]): YearRow[] {
   plan = normalizePlan(plan);
   let a: Assumptions = plan.assumptions;
   if (overrides) {
     a = { ...a, ...overrides };
   }
-  const infl = (y: number) => (1 + a.inflation) ** (y - a.start_year);
+  // income.end === RETIREMENT tracks the scenario's (possibly overridden)
+  // retirement_year rather than a fixed year — resolved here, under
+  // EFFECTIVE assumptions, so the rest of run() never sees the sentinel.
+  const incomes = plan.incomes.map((i) => (i.end === RETIREMENT ? { ...i, end: a.retirement_year - 1 } : i));
+  let rateFor: (y: number) => { ret: number; inflation: number };
+  if (rates) {
+    const byYear = new Map<number, YearRates>();
+    for (const r of rates) {
+      byYear.set(r.year, r);
+    }
+    for (let y = a.start_year; y <= a.end_year; y++) {
+      const r = byYear.get(y);
+      if (!r) {
+        throw new Error(`rates schedule must cover ${a.start_year}..${a.end_year}`);
+      }
+      if (!Number.isFinite(r.ret) || !Number.isFinite(r.inflation)) {
+        throw new Error("rates schedule contains non-finite values");
+      }
+    }
+    rateFor = (y: number) => {
+      const r = byYear.get(y)!;
+      return { ret: r.ret, inflation: r.inflation };
+    };
+  } else {
+    rateFor = () => ({ ret: a.ret, inflation: a.inflation });
+  }
   const bal: Record<string, number> = {};
   const basis: Record<string, number> = {};
   for (const acc of plan.accounts) {
@@ -55,10 +91,24 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
   const spendHist: number[] = [];
   const rows: YearRow[] = [];
   const lastWorkYear = a.retirement_year - 1;
+  let f = 1.0;
+  const expGrow = plan.expenses.map((e) =>
+    e.nominal_at_start && e.start < a.start_year
+      ? (1 + a.inflation + (e.growth_over_inflation ?? 0)) ** (a.start_year - e.start - 1)
+      : 1.0,
+  );
 
   for (let y = a.start_year; y <= a.end_year; y++) {
+    if (y > a.start_year) {
+      f *= 1 + rateFor(y).inflation;
+    }
+    plan.expenses.forEach((e, i) => {
+      const gy = 1 + rateFor(y).inflation + (e.growth_over_inflation ?? 0);
+      if (y > (e.nominal_at_start ? e.start : a.start_year)) {
+        expGrow[i]! *= gy;
+      }
+    });
     const frac = y === a.start_year ? a.first_year_fraction : 1.0;
-    const f = infl(y);
     const age = y - plan.birth_year;
     const row: YearRow = {
       year: y,
@@ -74,9 +124,14 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
 
     // ---------- income ----------
     let gross = 0.0;
-    for (const i of plan.incomes) {
+    let taxableGross = 0.0;
+    for (const i of incomes) {
       if (i.start <= y && y <= i.end) {
-        gross += i.amount * f * frac;
+        const amt = i.amount * f * frac;
+        gross += amt;
+        if (i.taxable !== false) {
+          taxableGross += amt;
+        }
       }
     }
     let ssGross = 0.0;
@@ -90,10 +145,9 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
     // ---------- explicit expenses ----------
     let exp = 0.0;
     const funded529: [string, number][] = [];
-    for (const e of plan.expenses) {
+    plan.expenses.forEach((e, i) => {
       if (e.start <= y && y <= e.end) {
-        const g = 1 + a.inflation + (e.growth_over_inflation ?? 0);
-        let amt = e.amount * (e.nominal_at_start ? g ** (y - e.start) : g ** (y - a.start_year));
+        let amt = e.amount * expGrow[i]!;
         amt *= frac;
         if (e.fund_from) {
           funded529.push([e.fund_from, amt]);
@@ -101,7 +155,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
           exp += amt;
         }
       }
-    }
+    });
     const h = plan.house;
     if (h) {
       const hv = h.value * (1 + h.appreciation) ** (y - a.start_year);
@@ -138,7 +192,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
     let taxes: number;
     if (y <= lastWorkYear) {
       for (let iter = 0; iter < 4; iter++) {
-        taxes = Math.max(gross - pretax, 0.0) * ordRate;
+        taxes = Math.max(taxableGross - pretax, 0.0) * ordRate;
         let available = gross - taxes - exp;
         const newContribs: Map<string, number> = new Map();
         const newMatches: Map<string, number> = new Map();
@@ -154,25 +208,20 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
           }
           let want: number;
           if (c.to_limit && c.annual_limit_key) {
-            want = limits[c.annual_limit_key]!;
+            want = limits[c.annual_limit_key]! * frac;
           } else if (c.pct_of_income != null) {
             want = Math.min(
-              c.pct_of_income * 225_000 * f,
+              c.pct_of_income * gross,
               c.annual_limit_key != null ? (limits[c.annual_limit_key] ?? 1e18) : 1e18,
             );
           } else {
-            want = c.amount! * f;
+            want = c.amount! * f * frac;
           }
-          want *= frac;
           const amt = Math.max(Math.min(want, available), 0.0);
           available -= amt;
           let m = 0.0;
           if (c.employer_match_pct) {
-            m =
-              frac < 1
-                ? Math.min(c.employer_match_pct * 225_000 * f, amt) * frac
-                : Math.min(c.employer_match_pct * 225_000 * f, want);
-            m = amt > 0 ? m : 0.0;
+            m = amt > 0 ? Math.min(amt, c.employer_match_pct * gross) : 0.0;
           }
           if (c.employer_match_flat) {
             m = amt > 0 ? c.employer_match_flat * f * frac : 0.0;
@@ -194,7 +243,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
         matches = newMatches;
         pretax = newPretax;
       }
-      taxes = Math.max(gross - pretax, 0.0) * ordRate;
+      taxes = Math.max(taxableGross - pretax, 0.0) * ordRate;
       let contribSum = 0.0;
       for (const v of contribs.values()) {
         contribSum += v;
@@ -289,7 +338,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
 
     // ---------- growth ----------
     for (const acc of plan.accounts) {
-      const r = acc.growth != null ? acc.growth : a.ret;
+      const r = acc.growth != null ? acc.growth : rateFor(y).ret;
       bal[acc.name]! *= 1 + r * frac;
     }
 
@@ -310,7 +359,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
     spendHist.push(row.expenses);
     const tail = spendHist.slice(-3);
     const avg = tail.reduce((s, v) => s + v, 0) / Math.min(spendHist.length, 3);
-    if (coastYear === null && row.liquid_net_worth >= 4 * avg) {
+    if (coastYear === null && row.liquid_net_worth >= a.coast_multiple * avg) {
       coastYear = y;
     }
   }

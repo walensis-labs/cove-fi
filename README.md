@@ -16,11 +16,9 @@ cove-fi run my-plan.toml           # project it
 cove-fi scenario my-plan.toml --retirement-year 2048   # try a scenario
 ```
 
-Note: `--retirement-year` moves the work/retirement boundary only — it
-doesn't shorten any income event's own `end` date, so for a full
-early-retirement what-if, shorten your salary's `end` year in the plan too.
-See [`packages/cove-fi/README.md`](./packages/cove-fi/README.md) for the
-full explanation.
+Set an income's `end = "retirement"` (the scaffolded salary already is) and
+it ends automatically the year before `retirement_year` — including under a
+`--retirement-year` scenario override, which moves it too.
 
 Full walkthrough, MCP setup, and command reference:
 [`packages/cove-fi/README.md`](./packages/cove-fi/README.md).
@@ -29,29 +27,25 @@ Full walkthrough, MCP setup, and command reference:
 
 - [`docs/ASSUMPTIONS.md`](./docs/ASSUMPTIONS.md) — every default value and
   its citation
-- [`docs/CALIBRATION.md`](./docs/CALIBRATION.md) — how the engine is
-  validated and where it currently diverges
-- [`docs/CONVENTIONS.md`](./docs/CONVENTIONS.md) — behavioral conventions
-  discovered during calibration, each pinned by a test
+- [`docs/SEMANTICS.md`](./docs/SEMANTICS.md) — the engine's rules: the
+  contribution waterfall, drawdown order, sentinels, and more
+- [`docs/VALIDATION.md`](./docs/VALIDATION.md) — how the engine is
+  validated against published research and primary sources
 - [`docs/clients/`](./docs/clients) — MCP setup for Claude Desktop, Claude
   Code, and Cursor
 
-## Calibration status
+## Validation
 
-The engine is calibrated against a real household's ProjectionLab export
-(methodology and current numbers in
-[`docs/CALIBRATION.md`](./docs/CALIBRATION.md); the oracle data itself is
-private and never committed). **The accumulation phase is solid** — net
-worth and liquid net worth track the oracle within roughly 0.5–12%,
-withdrawals match exactly. **Retirement-phase drawdown still diverges
-substantially** — withdrawal ordering and tax treatment during decumulation
-is the top open calibration item, in progress. Treat pre-retirement numbers
-as trustworthy estimates and deep-retirement numbers as rough for now.
+The engine is validated against published research and primary sources —
+closed-form math, cross-plan invariants, IRS-table pins, and a Monte Carlo
+benchmark against the Trinity-study withdrawal-rate literature. See
+[`docs/VALIDATION.md`](./docs/VALIDATION.md) for the full methodology,
+citations, and an honest accounting of current limitations.
 
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
-- **0.3** — ProjectionLab import adapter
+- **0.3** — integrations (third-party import/export), portfolio mixes
 
 ## License
 

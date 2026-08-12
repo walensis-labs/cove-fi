@@ -7,11 +7,10 @@
 # right around its retirement year, not years ahead of it.
 #
 # Household: born 1990, working 2026-2041, retiring in 2042 at age 52.
-# Salary is set to $225,000 deliberately — that's the fixed income base the
-# engine uses for every `pct_of_income` contribution rung (a PL-parity
-# quirk: pct_of_income is NOT multiplied by this plan's actual salary), so
-# picking that number makes the "pct_of_income" rungs below read as roughly
-# their literal percentage of take-home pay.
+# Salary is $225,000. Every `pct_of_income` contribution rung below is a
+# literal percentage of this plan's actual gross income for that year (see
+# docs/SEMANTICS.md — income-relative bases), so raising or lowering the
+# salary changes what those rungs are worth without touching them directly.
 #
 # Things to try changing:
 #   - contributions[2].pct_of_income (brokerage, 0.22): this is the main
@@ -50,8 +49,8 @@ balance = 20000
 name = "salary"
 amount = 225000
 start = 2026
-end = 2041 # last full year of work before retiring in 2042
-reduces_by_pretax = true
+end = "retirement" # ends automatically the year before assumptions.retirement_year (2042)
+reduces_by_pretax = true # reserved — has no effect yet; pretax rungs already reduce the tax base automatically (see docs/SEMANTICS.md)
 
 [[social_security]]
 pia_monthly = 2200
@@ -78,7 +77,7 @@ end = 2041
 to_limit = true
 annual_limit_key = "401k"
 pretax = true
-employer_match_pct = 0.04 # matches against a fixed $225k base (engine quirk) — happens to equal 4% of this plan's own salary since salary = 225000 above
+employer_match_pct = 0.04 # matched 1:1 up to this % of household gross income
 
 [[contributions]]
 account = "roth"

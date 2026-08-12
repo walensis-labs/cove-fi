@@ -24,13 +24,14 @@ describe("mcp server", () => {
     const r = await client.callTool({ name, arguments: args });
     return JSON.parse((r.content as { text: string }[])[0]!.text);
   };
-  it("exposes all seven tools", async () => {
+  it("exposes all eight tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       "compare_scenarios",
       "fi_status",
       "get_assumptions",
       "load_plan",
+      "monte_carlo",
       "run_projection",
       "run_scenario",
       "set_assumption",
@@ -123,5 +124,27 @@ describe("mcp server", () => {
     expect(cmp.series.late.length).toBeLessThanOrEqual(30);
     expect(cmp.series.early.length).toBeLessThanOrEqual(30);
     expect(cmp.years.length).toBe(cmp.series.late.length);
+  });
+
+  it("monte_carlo returns a parseable, bounded payload", async () => {
+    await call("load_plan", { path: planPath });
+    const mc = await call("monte_carlo", { trials: 50, seed: 7 });
+    expect(mc.success_rate).toBeGreaterThanOrEqual(0);
+    expect(mc.success_rate).toBeLessThanOrEqual(1);
+    expect(mc.trials).toBe(50);
+    expect(mc.seed).toBe(7);
+    expect(mc.percentiles.p50.length).toBeLessThanOrEqual(30);
+    expect(mc.years.length).toBe(mc.percentiles.p50.length);
+  });
+
+  it("monte_carlo before load_plan -> structured error", async () => {
+    const r = await client.callTool({ name: "monte_carlo", arguments: {} });
+    expect(r.isError).toBe(true);
+  });
+
+  it("monte_carlo with an unknown scenario -> structured error", async () => {
+    await call("load_plan", { path: planPath });
+    const r = await client.callTool({ name: "monte_carlo", arguments: { scenario: "does-not-exist" } });
+    expect(r.isError).toBe(true);
   });
 });
