@@ -33,13 +33,36 @@ export interface YearRow {
   contributions: number;
 }
 
-export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
+export interface YearRates {
+  year: number;
+  ret: number;
+  inflation: number;
+}
+
+export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRates[]): YearRow[] {
   plan = normalizePlan(plan);
   let a: Assumptions = plan.assumptions;
   if (overrides) {
     a = { ...a, ...overrides };
   }
-  const infl = (y: number) => (1 + a.inflation) ** (y - a.start_year);
+  let rateFor: (y: number) => { ret: number; inflation: number };
+  if (rates) {
+    const byYear = new Map<number, YearRates>();
+    for (const r of rates) {
+      byYear.set(r.year, r);
+    }
+    for (let y = a.start_year; y <= a.end_year; y++) {
+      if (!byYear.has(y)) {
+        throw new Error(`rates schedule must cover ${a.start_year}..${a.end_year}`);
+      }
+    }
+    rateFor = (y: number) => {
+      const r = byYear.get(y)!;
+      return { ret: r.ret, inflation: r.inflation };
+    };
+  } else {
+    rateFor = () => ({ ret: a.ret, inflation: a.inflation });
+  }
   const bal: Record<string, number> = {};
   const basis: Record<string, number> = {};
   for (const acc of plan.accounts) {
@@ -55,10 +78,20 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
   const spendHist: number[] = [];
   const rows: YearRow[] = [];
   const lastWorkYear = a.retirement_year - 1;
+  let f = 1.0;
+  const expGrow = plan.expenses.map(() => 1.0);
 
   for (let y = a.start_year; y <= a.end_year; y++) {
+    if (y > a.start_year) {
+      f *= 1 + rateFor(y).inflation;
+    }
+    plan.expenses.forEach((e, i) => {
+      const gy = 1 + rateFor(y).inflation + (e.growth_over_inflation ?? 0);
+      if (y > (e.nominal_at_start ? e.start : a.start_year)) {
+        expGrow[i]! *= gy;
+      }
+    });
     const frac = y === a.start_year ? a.first_year_fraction : 1.0;
-    const f = infl(y);
     const age = y - plan.birth_year;
     const row: YearRow = {
       year: y,
@@ -90,10 +123,9 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
     // ---------- explicit expenses ----------
     let exp = 0.0;
     const funded529: [string, number][] = [];
-    for (const e of plan.expenses) {
+    plan.expenses.forEach((e, i) => {
       if (e.start <= y && y <= e.end) {
-        const g = 1 + a.inflation + (e.growth_over_inflation ?? 0);
-        let amt = e.amount * (e.nominal_at_start ? g ** (y - e.start) : g ** (y - a.start_year));
+        let amt = e.amount * expGrow[i]!;
         amt *= frac;
         if (e.fund_from) {
           funded529.push([e.fund_from, amt]);
@@ -101,7 +133,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
           exp += amt;
         }
       }
-    }
+    });
     const h = plan.house;
     if (h) {
       const hv = h.value * (1 + h.appreciation) ** (y - a.start_year);
@@ -289,7 +321,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>): YearRow[] {
 
     // ---------- growth ----------
     for (const acc of plan.accounts) {
-      const r = acc.growth != null ? acc.growth : a.ret;
+      const r = acc.growth != null ? acc.growth : rateFor(y).ret;
       bal[acc.name]! *= 1 + r * frac;
     }
 
