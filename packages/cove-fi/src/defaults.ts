@@ -68,8 +68,7 @@ export const CITED_DEFAULTS: CitedDefault[] = [
  * Reserved for a future retirement-spending curve (Blanchett 2014,
  * "Estimating the True Cost of Retirement" — the empirical "spending
  * smile": real spending declines through the go-go/slow-go years then
- * rises again with late-life healthcare costs). OFF by default in 0.1 —
- * the engine does not read this flag yet; spending stays flat in real
- * terms, matching ProjectionLab parity baseline behavior.
+ * rises again with late-life healthcare costs). Off by default; see
+ * docs/VALIDATION.md.
  */
 export const SPENDING_SMILE_FLAG = "spending_smile" as const;

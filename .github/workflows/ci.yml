@@ -13,4 +13,3 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build && pnpm typecheck && pnpm test
-      # private parity/oracle suites self-skip: env vars are unset here by construction

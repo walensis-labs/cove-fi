@@ -1,16 +1,20 @@
 /**
  * Cove FI engine v0.2 — deterministic annual simulator.
  *
- * Calibration discoveries vs v0:
- *   * PL's contribution waterfall is CASH-FLOW CONSTRAINED: rungs fund in
+ * Core semantics (full detail in docs/SEMANTICS.md):
+ *   * The contribution waterfall is CASH-FLOW CONSTRAINED: rungs fund in
  *     priority order only while (income - taxes - explicit expenses) lasts.
+ *     No rung ever triggers a withdrawal from another account to fund
+ *     itself.
  *   * Leftover surplus is SPENT (cashFlowDefault: "spend") and lands in the
- *     Expenses metric.  Working years never trigger withdrawals.
+ *     Expenses metric. Working years never trigger withdrawals.
  *   * Pretax rungs (401k/HSA) reduce the tax base -> solved iteratively.
+ *   * Retirement drawdown order is fixed: taxable -> hsa -> trad -> roth
+ *     -> cash, with basis-proportional gains on taxable withdrawals.
  *
- * Ported from cove_fi/engine.py — line-by-line, exact operation order.
- * Parity beats taste here by explicit project decision; do not "improve"
- * any formula, including the trad-withdrawal tax gross-up spiral below.
+ * Do not "improve" a formula here without updating docs/SEMANTICS.md and
+ * its guarding tests in the same change — see docs/VALIDATION.md for how
+ * this engine's behavior is checked.
  */
 import {
   type Assumptions,

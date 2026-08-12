@@ -12,11 +12,12 @@ ships as a CLI, a library, and an MCP server, so you can run it from a
 terminal, script against it, or just talk to it from Claude Desktop, Claude
 Code, or Cursor.
 
-The engine is grounded in actuals: its default assumptions and calculation
-order aren't picked for elegance, they're calibrated against a real
-household's retirement-planning software output (see [Calibration
-status](#calibration-status) below) and documented with citations in
-[`docs/ASSUMPTIONS.md`](../../docs/ASSUMPTIONS.md).
+The engine is grounded in research: its default assumptions aren't picked
+for elegance, they're cited from published sources and IRS tables (see
+[`docs/ASSUMPTIONS.md`](../../docs/ASSUMPTIONS.md)), and its behavior is
+checked against closed-form math, cross-plan invariants, and a Monte Carlo
+benchmark from the withdrawal-rate literature — see [Validation
+status](#validation-status) below.
 
 ## Quickstart (under 5 minutes)
 
@@ -89,29 +90,26 @@ Setup is a one-liner per client:
 - **Cursor:** add a block to `.cursor/mcp.json` — see
   [`docs/clients/cursor.md`](../../docs/clients/cursor.md)
 
-## Calibration status
+## Validation status
 
-The engine is calibrated against a real household's ProjectionLab export
-(see [`docs/CALIBRATION.md`](../../docs/CALIBRATION.md) for the full
-methodology — the oracle data itself is private and never committed). Short
-version: **the accumulation phase is solid** (net worth and liquid net
-worth track the oracle within roughly 0.5–12%, withdrawals match exactly),
-but **retirement-phase drawdown still diverges substantially** — our
-withdrawal ordering and tax treatment during decumulation is the top open
-calibration item. Numbers from `cove-fi` for years before retirement are
-trustworthy as an estimate; numbers deep into retirement should be treated
-as rough until that's fixed. Track progress in
-[`docs/CALIBRATION.md`](../../docs/CALIBRATION.md).
+The engine is validated against published research and primary sources,
+not any particular commercial planning tool — closed-form math, cross-plan
+invariants, IRS-table pins, and a Monte Carlo benchmark against the
+Trinity-study withdrawal-rate literature. See
+[`docs/VALIDATION.md`](../../docs/VALIDATION.md) for the full methodology,
+citations, and an honest accounting of current limitations (flat effective
+tax model, single-asset Monte Carlo, no state tax/IRMAA). For the engine's
+actual rules — the contribution waterfall, drawdown order, sentinels — see
+[`docs/SEMANTICS.md`](../../docs/SEMANTICS.md).
 
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
   instead of a single deterministic path.
-- **0.3** — ProjectionLab import adapter, so you can seed a plan from an
-  existing PL export instead of hand-writing TOML.
+- **0.3** — integrations (third-party import/export), portfolio mixes.
 
-Not planned for 0.1.0: Monte Carlo, PL import (both above), or an npm
-publish beyond this initial release prep.
+Not planned for 0.1.0: Monte Carlo, third-party import (both above), or an
+npm publish beyond this initial release prep.
 
 ## License
 

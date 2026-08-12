@@ -33,5 +33,5 @@ flag for a non-flat retirement spending curve: Blanchett, David M. (2014),
 spending tends to decline through the "go-go"/"slow-go" retirement years
 and rise again late in life with healthcare costs (the "spending smile").
 The flag is reserved but **OFF by default** in this release — the engine
-ignores it and projects flat real spending, matching the ProjectionLab
-parity baseline (see `docs/CALIBRATION.md`).
+ignores it and projects flat real spending; see
+[`docs/VALIDATION.md`](./VALIDATION.md) for why.

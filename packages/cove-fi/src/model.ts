@@ -1,11 +1,11 @@
 /**
  * Cove FI engine — internal plan model.
  *
- * This is OUR schema. ProjectionLab's exportData JSON is one adapter away
- * (adapters/projectionlab, later); YNAB-derived plans are another.
- * All amounts are annual, in today's dollars unless noted.
+ * This is OUR schema. Third-party plan formats are one adapter away
+ * (a future integrations layer, see the 0.3 roadmap); YNAB-derived plans
+ * are another. All amounts are annual, in today's dollars unless noted.
  *
- * Ported from cove_fi/model.py — TypeScript port, exact parity by design.
+ * See docs/SEMANTICS.md for the engine's rules in full.
  */
 
 export type TaxType = "cash" | "taxable" | "trad" | "roth" | "hsa" | "529";
@@ -44,7 +44,7 @@ export interface Expense {
   start: number;
   end: number;
   growth_over_inflation?: number; // e.g. healthcare +2 or +3
-  nominal_at_start?: boolean; // PL grow$: amount is nominal at start year
+  nominal_at_start?: boolean; // amount is nominal at the item's own start year and compounds from there (see SEMANTICS.md)
   fund_from?: string | null; // account name (529-funded education)
 }
 
