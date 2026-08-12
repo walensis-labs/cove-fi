@@ -1,10 +1,9 @@
 /**
- * seed_from_ynab — mocked-client unit tests + MCP-level tests + one
- * env-gated live smoke test. `@walensis/ynab-client` is mocked for every
- * test EXCEPT the live-smoke block at the bottom, which explicitly
- * unmocks it and re-imports the module fresh so it hits the real YNAB API
- * — see that block's comment for why it has to live in this same file but
- * still avoid the mock.
+ * seed_from_ynab — mocked-client unit tests + MCP-level tests.
+ * `@walensis/ynab-client` is mocked for every test in this file; the
+ * env-gated live smoke test that hits the real YNAB API lives in
+ * test/seed-ynab.live.test.ts instead — see the comment at the bottom of
+ * this file for why it can't share a file with these mocked tests.
  */
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";

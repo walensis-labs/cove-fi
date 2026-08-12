@@ -198,7 +198,7 @@ export function createServer(session: Session): McpServer {
     "create_plan",
     {
       description:
-        "Create a new plan in the session from a JSON object (accounts/incomes/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text.",
+        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars).",
       inputSchema: { plan: z.record(z.unknown()) },
     },
     ({ plan }) => guarded(() => session.createPlan(plan)),
@@ -208,7 +208,7 @@ export function createServer(session: Session): McpServer {
     "update_plan",
     {
       description:
-        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions`). At least one of `add`/`set` is required.",
+        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions`). At least one of `add`/`set` is required (amounts are annual, today's dollars).",
       inputSchema: {
         add: z.record(z.unknown()).optional(),
         set: z.record(z.unknown()).optional(),
@@ -360,7 +360,8 @@ export function createServer(session: Session): McpServer {
         "proposed starting point — spending by category group, detected income, and an estimated " +
         "savings rate over the last 6 complete months. Never touches the loaded plan; the caller " +
         "must confirm with the user and pass values into create_plan/update_plan by hand. If no " +
-        "token is set, returns `{ configured: false, instructions }` (not an error).",
+        "token is set, returns `{ configured: false, instructions }` (not an error). Seeded " +
+        "figures are MONTHLY; multiply ×12 when building plan entries.",
       inputSchema: { budget_id: z.string().optional() },
     },
     ({ budget_id }) => guarded(() => seedFromYnab(budget_id === undefined ? undefined : { budgetId: budget_id })),
@@ -396,11 +397,12 @@ const ONBOARD_PROMPT = `You are guiding the user through setting up a Cove FI re
    - Household: who's included, and birth year(s).
    - Accounts & balances: name, \`tax\` (one of \`cash\`|\`taxable\`|\`trad\`|\`roth\`|\`hsa\`|\`529\`), balance, and cost basis where relevant.
    - Income streams: source, amount, and timing.
+   - Social Security (optional): ask if the user wants to include SS benefits; if so, collect \`pia_monthly\` and \`claim_year\` for each person.
    - Recurring expenses & housing.
    - Contributions & savings rungs (what gets funded, in what order).
    - Retirement intent: when income should stop — set \`income.end = "retirement"\` for income that ends at retirement rather than a hardcoded year (this may also appear as the numeric sentinel \`-2\`).
 
-4. Build the plan iteratively as you go: as soon as you have the household section, call \`create_plan\`, seeding empty arrays for uncollected sections and \`assumptions: {}\` so the plan exists early — then \`update_plan\` (using \`add\`/\`set\`) after each subsequent section. After every update, read back a short PlanSummary: the counts (accounts, incomes, expenses, contributions) plus \`annual_gross_income\` and \`annual_expenses\` — confirm those two figures with the user before you continue.
+4. Build the plan iteratively as you go: as soon as you have the household section, call \`create_plan\`, seeding empty arrays for uncollected sections (\`accounts\`, \`incomes\`, \`social_security\`, \`expenses\`, \`contributions\` as \`[]\`) and \`assumptions: {}\` so the plan exists early — then \`update_plan\` (using \`add\`/\`set\`) after each subsequent section. Plan amounts are annual, today's dollars — convert monthly seed figures ×12, and every income/expense needs start and end years (ask; the seed proposal has none). After every update, read back a short PlanSummary: the counts (accounts, incomes, expenses, contributions) plus \`annual_gross_income\` and \`annual_expenses\` — confirm those two figures with the user before you continue.
 
 5. Once a plan exists, call \`get_assumptions\` and offer its defaults WITH their citations (its \`citations\` field, keyed by assumption name) to the user, letting them override any value via \`set_assumption\` or \`update_plan\`'s \`set.assumptions\`.
 

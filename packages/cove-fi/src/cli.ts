@@ -386,8 +386,9 @@ export function buildProgram(io: Io = defaultIo): Command {
     .option("--json", "output the full result as JSON instead of a table")
     .action((planRef: string, opts: { trials: number; seed?: number; json?: boolean }, cmd: Command) => {
       try {
-        // The raw runMonteCarlo/Session.monteCarlo path has no trials guard
-        // by design (ledger-noted) — validate here, before ever calling it.
+        // runMonteCarlo already guards trials, but validate here too so a
+        // bad --trials value fails fast with a CLI-flavored error message
+        // before we ever touch the session/plan.
         if (!Number.isInteger(opts.trials) || opts.trials < 1) {
           throw new Error(`invalid --trials "${opts.trials}" (must be a positive integer)`);
         }
