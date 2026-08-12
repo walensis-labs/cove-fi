@@ -336,8 +336,46 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
+  server.registerPrompt(
+    "onboard",
+    {
+      title: "Set up a retirement plan",
+      description:
+        "Guided interview that builds a Cove FI plan from scratch (or from an existing one): checks for saved plans, offers YNAB seeding, walks a manual interview when needed, and finishes with a projection, Monte Carlo run, and save.",
+    },
+    () => ({
+      messages: [
+        {
+          role: "user",
+          content: { type: "text", text: ONBOARD_PROMPT },
+        },
+      ],
+    }),
+  );
+
   return server;
 }
+
+const ONBOARD_PROMPT = `You are guiding the user through setting up a Cove FI retirement plan. Follow these steps in order.
+
+1. Check for existing plans. Call \`list_plans\`. If any are found, tell the user and offer to load one with \`load_plan\` before starting a new plan — don't assume they want to start over.
+
+2. Ask about YNAB. Ask whether the user tracks their finances in YNAB. If yes, call \`seed_from_ynab\` to get a proposed starting point (income, spending by category, estimated savings rate). Treat the result as a PROPOSAL: read it back to the user in plain, rounded numbers and get their confirmation before calling \`create_plan\` — never apply seeded numbers automatically. If this client also has budgeting tools you may have connected (a "Cove for YNAB"-style server, or similar), prefer those for richer category-level detail before falling back to \`seed_from_ynab\`.
+
+3. If there's no YNAB data (or the user declines), run a manual interview in this fixed order, asking one section at a time:
+   - Household: who's included, and birth year(s).
+   - Accounts & balances: name, type (e.g. taxable/traditional/roth/cash), balance, and cost basis where relevant.
+   - Income streams: source, amount, and timing.
+   - Recurring expenses & housing.
+   - Contributions & savings rungs (what gets funded, in what order).
+   - Retirement intent: when income should stop — set \`income.end = "retirement"\` for income that ends at retirement rather than a hardcoded year.
+   - Assumptions: call \`get_assumptions\` and offer the defaults WITH their citations, letting the user override any of them.
+
+4. Build the plan iteratively as you go: start with \`create_plan\` once you have the first section, then \`update_plan\` (using \`add\`/\`set\`) after each subsequent section. After every update, read back a short PlanSummary (accounts, incomes, expenses, contributions, birth year, retirement year) so the user can confirm before you continue.
+
+5. When the plan is complete, finish with: \`run_projection\`, then \`fi_status\`, then \`monte_carlo\` with 1000 trials. Present the resulting story in plain language (when they'd hit FI, how the Monte Carlo success rate looks), then call \`save_plan\` to persist it.
+
+6. Never invent numbers — ask. Round dollar amounts when reading anything back to the user. Offer assumption defaults with their citations from \`get_assumptions\` rather than picking values yourself.`;
 
 export async function runStdio(): Promise<void> {
   const server = createServer(new Session());

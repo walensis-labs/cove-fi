@@ -99,4 +99,24 @@ describe("mcp onboarding/plan-building tools", () => {
     const r = await client.callTool({ name: "save_plan", arguments: { name: "dup-plan" } });
     expect(r.isError).toBe(true);
   });
+
+  it("listPrompts contains the onboard prompt", async () => {
+    const { prompts } = await client.listPrompts();
+    expect(prompts.map((p) => p.name)).toContain("onboard");
+  });
+
+  it("getPrompt(onboard) covers the guided-onboarding load-bearing instructions", async () => {
+    const result = await client.getPrompt({ name: "onboard" });
+    const text = result.messages.map((m) => (m.content as { text: string }).text).join("\n");
+    const lower = text.toLowerCase();
+    expect(lower).toContain("list_plans");
+    expect(lower).toContain("ynab");
+    expect(lower).toContain("budgeting tools you may have connected");
+    expect(lower).toContain("create_plan");
+    expect(lower).toContain("update_plan");
+    expect(lower).toContain("never invent numbers");
+    expect(lower).toContain("save_plan");
+    expect(lower).toContain("monte_carlo");
+    expect(lower).toContain("get_assumptions");
+  });
 });
