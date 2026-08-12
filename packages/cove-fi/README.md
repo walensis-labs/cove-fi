@@ -72,11 +72,12 @@ instead of starting from the bare template.
 
 ## Use it from an AI assistant (MCP)
 
-`cove-fi mcp` starts a stdio MCP server exposing seven tools (`load_plan`,
+`cove-fi mcp` starts a stdio MCP server exposing eight tools (`load_plan`,
 `get_assumptions`, `set_assumption`, `run_projection`, `fi_status`,
-`run_scenario`, `compare_scenarios`) so you can talk through your plan in
-plain language instead of memorizing CLI flags — "try retiring at 57",
-"what if Social Security gets cut 25%", "compare 60 vs 65". As with the CLI
+`run_scenario`, `monte_carlo`, `compare_scenarios`) so you can talk
+through your plan in plain language instead of memorizing CLI flags —
+"try retiring at 57", "what if Social Security gets cut 25%", "compare 60
+vs 65", "what's my success rate over 1000 simulations". As with the CLI
 `scenario` command, `run_scenario`'s `retirement_year` override moves any
 income whose `end = "retirement"` right along with it — no separate plan
 edit needed.
@@ -105,11 +106,11 @@ actual rules — the contribution waterfall, drawdown order, sentinels — see
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
-  instead of a single deterministic path.
+  instead of a single deterministic path. **Shipped.**
 - **0.3** — integrations (third-party import/export), portfolio mixes.
 
-Not planned for 0.1.0: Monte Carlo, third-party import (both above), or an
-npm publish beyond this initial release prep.
+Not yet: bond series/portfolio mixes, progressive-bracket taxes,
+third-party import/export integrations (targeted for 0.3).
 
 ## License
 

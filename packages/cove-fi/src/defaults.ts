@@ -36,13 +36,13 @@ export const CITED_DEFAULTS: CitedDefault[] = [
     key: "income_tax",
     value: 0.3,
     unit: "flat effective rate",
-    source: "flat effective placeholder - FlatTax seam, see design §5",
+    source: "flat effective placeholder - FlatTax seam, see docs/SEMANTICS.md (tax model)",
   },
   {
     key: "local_tax",
     value: 0.01,
     unit: "flat effective rate",
-    source: "flat effective placeholder - FlatTax seam, see design §5",
+    source: "flat effective placeholder - FlatTax seam, see docs/SEMANTICS.md (tax model)",
   },
   {
     key: "cap_gains_tax",
