@@ -21,6 +21,7 @@ import { Command } from "commander";
 import type { YearRow } from "./engine.js";
 import type { MonteCarloResult } from "./montecarlo.js";
 import { initTemplate } from "./planfile.js";
+import { listPlans, type PlanEntry, resolvePlanRef } from "./planstore.js";
 import { type FiStatus, type ScenarioOverrides, Session } from "./session.js";
 
 export interface Io {
@@ -206,6 +207,26 @@ function resolveJson(opts: { json?: boolean }, cmd: Command): boolean {
   return !!(opts.json ?? cmd.optsWithGlobals().json);
 }
 
+/** Resolves a `<plan>` CLI argument: an existing file path is used as-is;
+ * otherwise it's treated as a bare plan-store name via `resolvePlanRef`. If
+ * neither exists, throws naming both attempted paths so the user can see
+ * exactly what was tried. */
+function resolvePlanArg(ref: string): string {
+  if (existsSync(ref)) return ref;
+  const storePath = resolvePlanRef(ref);
+  if (existsSync(storePath)) return storePath;
+  throw new Error(`plan not found: tried "${ref}" and "${storePath}"`);
+}
+
+function renderPlansTable(entries: PlanEntry[]): string[] {
+  const headers = ["Name", "Source", "Modified"];
+  const cellRows = entries.map((e) => [e.name, e.source, e.mtime.slice(0, 10)]);
+  const widths = headers.map((h, i) => Math.max(h.length, ...cellRows.map((row) => row[i]!.length)));
+  const headerLine = headers.map((h, i) => h.padEnd(widths[i]!)).join("  ");
+  const rowLines = cellRows.map((row) => row.map((v, i) => v.padEnd(widths[i]!)).join("  "));
+  return [headerLine, ...rowLines];
+}
+
 export function buildProgram(io: Io = defaultIo): Command {
   const program = new Command();
   program
@@ -231,14 +252,35 @@ export function buildProgram(io: Io = defaultIo): Command {
     });
 
   program
+    .command("plans")
+    .description("List plans saved in the plan store or found in the current directory")
+    .option("--json", "output JSON instead of a table")
+    .action((opts: { json?: boolean }, cmd: Command) => {
+      try {
+        const entries = listPlans();
+        if (resolveJson(opts, cmd)) {
+          io.out(JSON.stringify(entries));
+          return;
+        }
+        if (entries.length === 0) {
+          io.out("no plans found — run `cove-fi init` or save one from an MCP session");
+          return;
+        }
+        for (const line of renderPlansTable(entries)) io.out(line);
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+  program
     .command("run")
     .description("Run a plan and print its projection")
-    .argument("<plan>", "path to plan TOML file")
+    .argument("<plan>", "path to plan TOML file, or a bare name saved in the plan store")
     .option("--json", "output JSON instead of a table")
-    .action((planPath: string, opts: { json?: boolean }, cmd: Command) => {
+    .action((planRef: string, opts: { json?: boolean }, cmd: Command) => {
       try {
         const session = new Session();
-        session.loadPlanFile(planPath);
+        session.loadPlanFile(resolvePlanArg(planRef));
         printProjection(io, session, undefined, resolveJson(opts, cmd));
       } catch (err) {
         fail(err);
@@ -248,7 +290,7 @@ export function buildProgram(io: Io = defaultIo): Command {
   program
     .command("scenario")
     .description("Run a plan with scenario overrides applied")
-    .argument("<plan>", "path to plan TOML file")
+    .argument("<plan>", "path to plan TOML file, or a bare name saved in the plan store")
     .option("--retirement-year <n>", "override retirement year", (v) => Number(v))
     .option("--ret <x>", "override nominal investment return", (v) => Number(v))
     .option("--inflation <x>", "override inflation", (v) => Number(v))
@@ -258,7 +300,7 @@ export function buildProgram(io: Io = defaultIo): Command {
     .option("--json", "output JSON instead of a table")
     .action(
       (
-        planPath: string,
+        planRef: string,
         opts: {
           retirementYear?: number;
           ret?: number;
@@ -272,7 +314,7 @@ export function buildProgram(io: Io = defaultIo): Command {
       ) => {
         try {
           const session = new Session();
-          session.loadPlanFile(planPath);
+          session.loadPlanFile(resolvePlanArg(planRef));
           const overrides: ScenarioOverrides = {};
           if (opts.retirementYear !== undefined) overrides.retirement_year = opts.retirementYear;
           if (opts.ret !== undefined) overrides.ret = opts.ret;
@@ -291,16 +333,16 @@ export function buildProgram(io: Io = defaultIo): Command {
   program
     .command("compare")
     .description("Compare named scenarios against a baseline")
-    .argument("<plan>", "path to plan TOML file")
+    .argument("<plan>", "path to plan TOML file, or a bare name saved in the plan store")
     .option("--scenario <spec>", "name:key=val,key=val,... (repeatable; first is the baseline)", collectScenario, [] as string[])
     .option("--json", "output the raw compareScenarios JSON")
-    .action((planPath: string, opts: { scenario: string[]; json?: boolean }, cmd: Command) => {
+    .action((planRef: string, opts: { scenario: string[]; json?: boolean }, cmd: Command) => {
       try {
         if (!opts.scenario || opts.scenario.length === 0) {
           throw new Error("compare requires at least one --scenario name:key=val,...");
         }
         const session = new Session();
-        session.loadPlanFile(planPath);
+        session.loadPlanFile(resolvePlanArg(planRef));
         const specs = opts.scenario.map(parseScenarioArg);
         for (const s of specs) session.defineScenario(s.name, s.overrides);
         const names = specs.map((s) => s.name);
@@ -323,12 +365,13 @@ export function buildProgram(io: Io = defaultIo): Command {
   program
     .command("check")
     .description("Validate a plan file without running it")
-    .argument("<plan>", "path to plan TOML file")
-    .action((planPath: string) => {
+    .argument("<plan>", "path to plan TOML file, or a bare name saved in the plan store")
+    .action((planRef: string) => {
       try {
+        const resolved = resolvePlanArg(planRef);
         const session = new Session();
-        session.loadPlanFile(planPath);
-        io.out(`plan OK: ${planPath}`);
+        session.loadPlanFile(resolved);
+        io.out(`plan OK: ${resolved}`);
       } catch (err) {
         fail(err);
       }
@@ -337,11 +380,11 @@ export function buildProgram(io: Io = defaultIo): Command {
   program
     .command("mc")
     .description("Run a Monte Carlo simulation and print success rate + per-decade percentile bands")
-    .argument("<plan>", "path to plan TOML file")
+    .argument("<plan>", "path to plan TOML file, or a bare name saved in the plan store")
     .option("--trials <n>", "number of trials", (v) => Number(v), 1000)
     .option("--seed <n>", "PRNG seed (omit for a random seed)", (v) => Number(v))
     .option("--json", "output the full result as JSON instead of a table")
-    .action((planPath: string, opts: { trials: number; seed?: number; json?: boolean }, cmd: Command) => {
+    .action((planRef: string, opts: { trials: number; seed?: number; json?: boolean }, cmd: Command) => {
       try {
         // The raw runMonteCarlo/Session.monteCarlo path has no trials guard
         // by design (ledger-noted) — validate here, before ever calling it.
@@ -352,7 +395,7 @@ export function buildProgram(io: Io = defaultIo): Command {
           throw new Error(`invalid --seed "${opts.seed}" (must be an integer)`);
         }
         const session = new Session();
-        session.loadPlanFile(planPath);
+        session.loadPlanFile(resolvePlanArg(planRef));
         const mc = session.monteCarlo(undefined, opts.trials, opts.seed);
         if (resolveJson(opts, cmd)) {
           // Full-resolution, untruncated, unrounded — matches `run --json`/

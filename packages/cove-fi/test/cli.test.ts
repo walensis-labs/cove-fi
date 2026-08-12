@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dumpPlan } from "../src/planfile.js";
 import { buildProgram } from "../src/cli.js";
+import { savePlan } from "../src/planstore.js";
 import { syntheticPlan } from "./helpers/synthetic.js";
 
 /** Runs buildProgram() against argv, capturing io.out lines, console.error lines,
@@ -39,13 +40,17 @@ function writeTmpPlan(dir: string): string {
 
 describe("cli", () => {
   let dir: string;
+  let plansDir: string;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "cove-fi-cli-"));
+    plansDir = mkdtempSync(join(tmpdir(), "cove-fi-cli-plans-"));
+    vi.stubEnv("COVE_FI_PLANS", plansDir);
   });
 
   afterEach(() => {
     process.exitCode = undefined;
+    vi.unstubAllEnvs();
   });
 
   it("run prints a header row containing Year and Net Worth plus one line per year", async () => {
@@ -251,6 +256,86 @@ describe("cli", () => {
     const { err, exitCode } = await runCli(["mc", planPath, "--seed", "abc"]);
     expect(exitCode).toBe(1);
     expect(err.join("\n")).toMatch(/^error:/);
+  });
+
+  it("plans lists a saved plan with Name/Source/Modified columns", async () => {
+    savePlan("my-plan", syntheticPlan());
+    const { out, exitCode } = await runCli(["plans"]);
+    expect(exitCode).toBeUndefined();
+    expect(out[0]).toMatch(/Name/);
+    expect(out[0]).toMatch(/Source/);
+    expect(out[0]).toMatch(/Modified/);
+    const text = out.join("\n");
+    expect(text).toMatch(/my-plan/);
+    expect(text).toMatch(/store/);
+  });
+
+  it("plans --json parses to a PlanEntry[] array", async () => {
+    savePlan("my-plan", syntheticPlan());
+    const { out, exitCode } = await runCli(["plans", "--json"]);
+    expect(exitCode).toBeUndefined();
+    expect(out.length).toBe(1);
+    const parsed = JSON.parse(out[0]!);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0].name).toBe("my-plan");
+    expect(parsed[0].source).toBe("store");
+    expect(typeof parsed[0].mtime).toBe("string");
+    expect(typeof parsed[0].path).toBe("string");
+  });
+
+  it("plans on an empty store prints a helpful message", async () => {
+    const { out, exitCode } = await runCli(["plans"]);
+    expect(exitCode).toBeUndefined();
+    expect(out.join("\n")).toMatch(/no plans found/i);
+    expect(out.join("\n")).toMatch(/cove-fi init/);
+  });
+
+  it("plans --json on an empty store prints []", async () => {
+    const { out, exitCode } = await runCli(["plans", "--json"]);
+    expect(exitCode).toBeUndefined();
+    expect(out).toEqual(["[]"]);
+  });
+
+  it("run <bare-name> resolves via the plan store after savePlan", async () => {
+    savePlan("my-plan", syntheticPlan());
+    const { out, exitCode } = await runCli(["run", "my-plan", "--json"]);
+    expect(exitCode).toBeUndefined();
+    const parsed = JSON.parse(out[0]!);
+    expect(Array.isArray(parsed.rows)).toBe(true);
+  });
+
+  it("run <missing-bare-name> exits nonzero and names both attempted paths", async () => {
+    const { err, exitCode } = await runCli(["run", "does-not-exist"]);
+    expect(exitCode).toBe(1);
+    const text = err.join("\n");
+    expect(text).toMatch(/^error:/);
+    expect(text).toContain("does-not-exist");
+    expect(text).toContain(join(plansDir, "does-not-exist.toml"));
+  });
+
+  it("scenario <bare-name> resolves via the plan store", async () => {
+    savePlan("my-plan", syntheticPlan());
+    const { exitCode } = await runCli(["scenario", "my-plan", "--retirement-year", "2045", "--json"]);
+    expect(exitCode).toBeUndefined();
+  });
+
+  it("compare <bare-name> resolves via the plan store", async () => {
+    savePlan("my-plan", syntheticPlan());
+    const { exitCode } = await runCli(["compare", "my-plan", "--scenario", "base:"]);
+    expect(exitCode).toBeUndefined();
+  });
+
+  it("check <bare-name> resolves via the plan store", async () => {
+    savePlan("my-plan", syntheticPlan());
+    const { out, exitCode } = await runCli(["check", "my-plan"]);
+    expect(exitCode).toBeUndefined();
+    expect(out.join("\n")).toMatch(/ok/i);
+  });
+
+  it("mc <bare-name> resolves via the plan store", async () => {
+    savePlan("my-plan", syntheticPlan());
+    const { exitCode } = await runCli(["mc", "my-plan", "--trials", "5", "--seed", "1"]);
+    expect(exitCode).toBeUndefined();
   });
 });
 
