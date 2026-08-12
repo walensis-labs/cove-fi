@@ -39,6 +39,12 @@ describe("monte carlo", () => {
     runMonteCarlo(syntheticPlan(), { trials: 1000, seed: 1 });
     expect(performance.now() - t0).toBeLessThan(5_000);
   });
+  it("trials: 0 throws with positive integer error", () => {
+    expect(() => runMonteCarlo(syntheticPlan(), { trials: 0 })).toThrow(/positive integer/);
+  });
+  it("trials: 10.5 throws with positive integer error", () => {
+    expect(() => runMonteCarlo(syntheticPlan(), { trials: 10.5 })).toThrow(/positive integer/);
+  });
 });
 
 describe("withdrawal-rate benchmark (Trinity study / Bengen 1994)", () => {

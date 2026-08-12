@@ -20,6 +20,12 @@ Open a new chat and confirm the hammer/tools icon lists `cove-fi`'s tools
 (`load_plan`, `run_projection`, `fi_status`, `run_scenario`,
 `compare_scenarios`, ...).
 
+## Onboarding
+
+Pick `onboard` from the prompts menu for the guided flow, or just type
+"set up my retirement plan" — the assistant drives the same flow through
+the tools.
+
 ## Example prompts
 
 - "Load my-plan.toml and tell me if I'm on track. Then try retirement at 57

@@ -14,8 +14,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { CITED_DEFAULTS } from "../defaults.js";
 import { type YearRow } from "../engine.js";
 import { type Assumptions, DEFAULT_ASSUMPTIONS } from "../model.js";
+import { listPlans, resolvePlanRef } from "../planstore.js";
+import { seedFromYnab } from "../seed/ynab.js";
 import { type FiStatus, Session } from "../session.js";
 import { thinIndices, thinMonteCarloResult, thinRows } from "../thin.js";
 
@@ -32,11 +35,14 @@ function toolError(err: unknown): CallToolResult {
   return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: message }) }] };
 }
 
-/** Wraps a handler body so any thrown Session/engine error becomes a
- * structured tool error instead of crashing the server. */
-function guarded(fn: () => unknown): CallToolResult {
+/** Wraps a handler body so any thrown Session/engine error (or rejected
+ * promise — `fn` may be sync or async, e.g. seed_from_ynab's network call)
+ * becomes a structured tool error instead of crashing the server. `await`
+ * on a non-promise value resolves immediately, so this stays a drop-in
+ * replacement for every pre-existing synchronous call site. */
+async function guarded(fn: () => unknown): Promise<CallToolResult> {
   try {
-    return toolOk(fn());
+    return toolOk(await fn());
   } catch (err) {
     return toolError(err);
   }
@@ -82,6 +88,13 @@ function roundFiStatus(fi: FiStatus): FiStatus {
 
 const ASSUMPTIONS_KEYS = Object.keys(DEFAULT_ASSUMPTIONS) as [keyof Assumptions, ...(keyof Assumptions)[]];
 
+// get_assumptions pairs each assumption with its citation where one
+// exists (CITED_DEFAULTS is a strict subset of Assumptions' keys — e.g.
+// retirement_year/start_year have no citation and are simply absent here).
+const ASSUMPTION_CITATIONS: Record<string, string> = Object.fromEntries(
+  CITED_DEFAULTS.map((d) => [d.key, d.source]),
+);
+
 // Explicit shapes (not a z.record(z.unknown()) passthrough): the engine
 // has no validation of its own for extra_expenses/extra_incomes — a
 // missing `amount` becomes `undefined * x = NaN`, which then poisons
@@ -105,6 +118,16 @@ const extraIncomeShape = z.object({
   taxable: z.boolean().optional(),
   reduces_by_pretax: z.boolean().optional(),
 });
+
+// update_plan requires at least one of add/set — expressed as a refine on
+// a standalone object schema (registerTool's inputSchema wants a raw shape,
+// not a ZodObject, so this is parsed by hand in the handler rather than
+// passed as the tool's inputSchema).
+const updatePlanArgsSchema = z
+  .object({ add: z.record(z.unknown()).optional(), set: z.record(z.unknown()).optional() })
+  .refine((v) => v.add !== undefined || v.set !== undefined, {
+    message: "update_plan requires at least one of `add` or `set`",
+  });
 
 const scenarioOverridesShape = {
   retirement_year: z.number().optional(),
@@ -141,21 +164,89 @@ export function createServer(session: Session): McpServer {
 
   server.registerTool(
     "load_plan",
-    { description: "Load a plan TOML file into the session.", inputSchema: { path: z.string() } },
+    {
+      description:
+        "Load a plan into the session. `path` accepts either a bare saved-plan name (resolved against ~/.cove-fi/plans or COVE_FI_PLANS, e.g. \"my-plan\") or an absolute/relative path to a plan TOML file.",
+      inputSchema: { path: z.string() },
+    },
     ({ path }) =>
       guarded(() => {
-        session.loadPlanFile(path);
-        return { path, loaded: true };
+        const resolved = resolvePlanRef(path);
+        session.loadPlanFile(resolved);
+        return { path: resolved, loaded: true };
+      }),
+  );
+
+  server.registerTool(
+    "list_plans",
+    {
+      description:
+        "List discoverable saved plans (from the plan store and the current working directory), most recently touched first.",
+      inputSchema: {},
+    },
+    () =>
+      guarded(() => {
+        const plans = listPlans();
+        if (plans.length === 0) {
+          return { plans, hint: "No plans found. Use the onboard prompt, create_plan, or seed_from_ynab." };
+        }
+        return { plans };
+      }),
+  );
+
+  server.registerTool(
+    "create_plan",
+    {
+      description:
+        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars).",
+      inputSchema: { plan: z.record(z.unknown()) },
+    },
+    ({ plan }) => guarded(() => session.createPlan(plan)),
+  );
+
+  server.registerTool(
+    "update_plan",
+    {
+      description:
+        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions`). At least one of `add`/`set` is required (amounts are annual, today's dollars).",
+      inputSchema: {
+        add: z.record(z.unknown()).optional(),
+        set: z.record(z.unknown()).optional(),
+      },
+    },
+    (args) => {
+      const parsed = updatePlanArgsSchema.safeParse(args);
+      if (!parsed.success) {
+        return toolError(new Error("update_plan requires at least one of `add` or `set`"));
+      }
+      return guarded(() => session.updatePlan(parsed.data));
+    },
+  );
+
+  server.registerTool(
+    "save_plan",
+    {
+      description: "Persist the session's current plan to the plan store under `name`.",
+      inputSchema: { name: z.string(), overwrite: z.boolean().default(false) },
+    },
+    ({ name, overwrite }) =>
+      guarded(() => {
+        const path = session.saveCurrentPlan(name, overwrite);
+        return { path };
       }),
   );
 
   server.registerTool(
     "get_assumptions",
-    { description: "Return the loaded plan's assumptions.", inputSchema: {} },
+    {
+      description:
+        "Return the loaded plan's assumptions, plus a `citations` map (assumption key -> source justification) for the ones that have one.",
+      inputSchema: {},
+    },
     () =>
       guarded(() => {
         if (!session.plan) throw new Error("no plan loaded — call load_plan first");
-        return session.plan.assumptions;
+        return { assumptions: session.plan.assumptions, citations: ASSUMPTION_CITATIONS };
       }),
   );
 
@@ -261,8 +352,63 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
+  server.registerTool(
+    "seed_from_ynab",
+    {
+      description:
+        "PROPOSE-ONLY: reads a YNAB budget (via COVE_FI_YNAB_TOKEN or YNAB_TOKEN) and returns a " +
+        "proposed starting point — spending by category group, detected income, and an estimated " +
+        "savings rate over the last 6 complete months. Never touches the loaded plan; the caller " +
+        "must confirm with the user and pass values into create_plan/update_plan by hand. If no " +
+        "token is set, returns `{ configured: false, instructions }` (not an error). Seeded " +
+        "figures are MONTHLY; multiply ×12 when building plan entries.",
+      inputSchema: { budget_id: z.string().optional() },
+    },
+    ({ budget_id }) => guarded(() => seedFromYnab(budget_id === undefined ? undefined : { budgetId: budget_id })),
+  );
+
+  server.registerPrompt(
+    "onboard",
+    {
+      title: "Set up a retirement plan",
+      description:
+        "Guided interview that builds a Cove FI plan from scratch (or from an existing one): checks for saved plans, offers YNAB seeding, walks a manual interview when needed, and finishes with a projection, Monte Carlo run, and save.",
+    },
+    () => ({
+      messages: [
+        {
+          role: "user",
+          content: { type: "text", text: ONBOARD_PROMPT },
+        },
+      ],
+    }),
+  );
+
   return server;
 }
+
+const ONBOARD_PROMPT = `You are guiding the user through setting up a Cove FI retirement plan. Follow these steps in order.
+
+1. Check for existing plans. Call \`list_plans\`. If any are found, tell the user and offer to load one with \`load_plan\` before starting a new plan — don't assume they want to start over.
+
+2. Ask about YNAB. First check whether this client also has budgeting tools you may have connected (a "Cove for YNAB"-style server, or similar) — if so, prefer those for richer category-level detail. Otherwise, ask whether the user tracks their finances in YNAB and, if yes, call \`seed_from_ynab\` to get a proposed starting point (income, spending by category, estimated savings rate). Either way, treat whatever comes back as a PROPOSAL only: read it back to the user in plain, rounded numbers and get their explicit confirmation before it goes into \`create_plan\`/\`update_plan\` — never apply seeded numbers automatically, from either source.
+
+3. Run a manual interview to collect whatever seeding didn't cover (birth years, account balances, and contributions are never in the seed proposal — always ask for these; other sections may already be confirmed from step 2). Ask one section at a time, in this fixed order:
+   - Household: who's included, and birth year(s).
+   - Accounts & balances: name, \`tax\` (one of \`cash\`|\`taxable\`|\`trad\`|\`roth\`|\`hsa\`|\`529\`), balance, and cost basis where relevant.
+   - Income streams: source, amount, and timing.
+   - Social Security (optional): ask if the user wants to include SS benefits; if so, collect \`pia_monthly\` and \`claim_year\` for each person.
+   - Recurring expenses & housing.
+   - Contributions & savings rungs (what gets funded, in what order).
+   - Retirement intent: when income should stop — set \`income.end = "retirement"\` for income that ends at retirement rather than a hardcoded year (this may also appear as the numeric sentinel \`-2\`).
+
+4. Build the plan iteratively as you go: as soon as you have the household section, call \`create_plan\`, seeding empty arrays for uncollected sections (\`accounts\`, \`incomes\`, \`social_security\`, \`expenses\`, \`contributions\` as \`[]\`) and \`assumptions: {}\` so the plan exists early — then \`update_plan\` (using \`add\`/\`set\`) after each subsequent section. Plan amounts are annual, today's dollars — convert monthly seed figures ×12, and every income/expense needs start and end years (ask; the seed proposal has none). After every update, read back a short PlanSummary: the counts (accounts, incomes, expenses, contributions) plus \`annual_gross_income\` and \`annual_expenses\` — confirm those two figures with the user before you continue.
+
+5. Once a plan exists, call \`get_assumptions\` and offer its defaults WITH their citations (its \`citations\` field, keyed by assumption name) to the user, letting them override any value via \`set_assumption\` or \`update_plan\`'s \`set.assumptions\`.
+
+6. When the plan is complete, finish with: \`run_projection\`, then \`fi_status\`, then \`monte_carlo\` with 1000 trials. \`monte_carlo\`'s dollar figures are NOMINAL (no today's-$ conversion is meaningful under sampled inflation); \`run_projection\`'s \`todays\` rows give today's-dollar equivalents if the user wants those. Present the resulting story in plain language (when they'd hit FI, how the Monte Carlo success rate looks), then ask the user what to name the plan and call \`save_plan\`. If \`save_plan\` errors because that name already exists, confirm with the user before retrying with \`overwrite: true\` — never overwrite silently.
+
+7. Never invent numbers — ask. Round dollar amounts when reading anything back to the user. Offer assumption defaults with their citations from \`get_assumptions\` rather than picking values yourself.`;
 
 export async function runStdio(): Promise<void> {
   const server = createServer(new Session());

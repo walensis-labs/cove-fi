@@ -20,6 +20,13 @@ Open the MCP settings panel and confirm `cove-fi` shows as enabled with its
 tools listed (`load_plan`, `run_projection`, `fi_status`, `run_scenario`,
 `compare_scenarios`, ...).
 
+## Onboarding
+
+Prompt support varies by Cursor version — if MCP prompts are surfaced in
+your build, look for `cove-fi`'s `onboard` prompt there. Either way, just
+typing "set up my retirement plan" in the chat works: Cursor's model can
+call the same tools directly even without native prompt support.
+
 ## Example prompts
 
 - "Load my-plan.toml and tell me if I'm on track. Then try retirement at 57

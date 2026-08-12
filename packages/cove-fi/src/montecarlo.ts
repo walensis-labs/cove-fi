@@ -65,6 +65,7 @@ function percentileOf(sorted: number[], p: number): number {
 
 export function runMonteCarlo(plan: Plan, opts: MonteCarloOptions = {}): MonteCarloResult {
   const trials = opts.trials ?? 1000;
+  if (!Number.isInteger(trials) || trials < 1) throw new Error("trials must be a positive integer");
   const seed = opts.seed ?? crypto.getRandomValues(new Uint32Array(1))[0]!;
   const overrides = opts.overrides;
 

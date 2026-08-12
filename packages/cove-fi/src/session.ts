@@ -30,6 +30,8 @@ import { run, type YearRow } from "./engine.js";
 import { type Assumptions, type Expense, type Income, IRS_LIMITS_2026, type Plan } from "./model.js";
 import { runMonteCarlo, type MonteCarloResult } from "./montecarlo.js";
 import { loadPlan } from "./planfile.js";
+import { planFromJson } from "./planjson.js";
+import { savePlan } from "./planstore.js";
 
 export interface ScenarioOverrides {
   retirement_year?: number;
@@ -54,6 +56,24 @@ export interface FiStatus {
 export interface ProjectionResult {
   rows: YearRow[];
   todays: YearRow[]; // todays = each metric / (1+inflation)^(y-start)
+}
+
+export interface PlanSummary {
+  accounts: number;
+  incomes: number;
+  expenses: number;
+  contributions: number;
+  birth_year: number;
+  retirement_year: number;
+  annual_gross_income: number; // year-1 row, rounded
+  annual_expenses: number; // year-1 row, rounded
+}
+
+/** Array fields `updatePlan`'s `add` is allowed to append to. */
+const APPENDABLE_FIELDS = new Set(["accounts", "incomes", "expenses", "contributions"]);
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 const DOLLAR_METRICS = [
@@ -166,13 +186,76 @@ export class Session {
   plan: Plan | null = null;
   planPath: string | null = null;
   scenarios: Map<string, ScenarioOverrides> = new Map();
+  /** true after createPlan/updatePlan, false after saveCurrentPlan or loadPlanFile. */
+  dirty = false;
 
   loadPlanFile(path: string): Plan {
     const text = readFileSync(path, "utf8");
     const plan = loadPlan(text);
     this.plan = plan;
     this.planPath = path;
+    this.dirty = false;
     return plan;
+  }
+
+  /** Validates `data` (planFromJson) and, only on success, makes it the session's plan.
+   * planPath resets to null (unsaved) and dirty is set. */
+  createPlan(data: unknown): PlanSummary {
+    const plan = planFromJson(data);
+    this.plan = plan;
+    this.planPath = null;
+    this.dirty = true;
+    return this.planSummary();
+  }
+
+  /** Patches the current plan on a `structuredClone` and re-validates the merged
+   * result with `planFromJson` before swapping it in — a failed patch leaves the
+   * session plan (and everything derived from it) bit-identical and throws. */
+  updatePlan(patch: { add?: Record<string, unknown>; set?: Record<string, unknown> }): PlanSummary {
+    const plan = this.requirePlan();
+    const draft = structuredClone(plan) as unknown as Record<string, unknown>;
+
+    if (patch.set) {
+      for (const [key, value] of Object.entries(patch.set)) {
+        if (key === "assumptions") {
+          if (!isPlainObject(value)) {
+            throw new Error("updatePlan: set.assumptions must be an object");
+          }
+          draft.assumptions = { ...(draft.assumptions as Record<string, unknown>), ...value };
+        } else {
+          draft[key] = value;
+        }
+      }
+    }
+
+    if (patch.add) {
+      for (const [key, value] of Object.entries(patch.add)) {
+        if (!APPENDABLE_FIELDS.has(key)) {
+          throw new Error(
+            `updatePlan: add.${key} is not an appendable field — add only accepts ${[...APPENDABLE_FIELDS].join(", ")}`,
+          );
+        }
+        if (!Array.isArray(value)) {
+          throw new Error(`updatePlan: add.${key} must be an array of items to append`);
+        }
+        const existing = Array.isArray(draft[key]) ? (draft[key] as unknown[]) : [];
+        draft[key] = [...existing, ...value];
+      }
+    }
+
+    const validated = planFromJson(draft);
+    this.plan = validated;
+    this.dirty = true;
+    return this.planSummary();
+  }
+
+  /** Persists the session's current plan via planstore.savePlan and marks it clean. */
+  saveCurrentPlan(name: string, overwrite?: boolean): string {
+    const plan = this.requirePlan();
+    const path = savePlan(name, plan, { overwrite });
+    this.planPath = path;
+    this.dirty = false;
+    return path;
   }
 
   defineScenario(name: string, o: ScenarioOverrides): void {
@@ -228,6 +311,22 @@ export class Session {
       };
     }
     return { years: series[baseName]!.map((r) => r.year), series, deltas };
+  }
+
+  private planSummary(): PlanSummary {
+    const plan = this.plan!;
+    const rows = run(plan);
+    const year1 = rows[0]!;
+    return {
+      accounts: plan.accounts.length,
+      incomes: plan.incomes.length,
+      expenses: plan.expenses.length,
+      contributions: plan.contributions.length,
+      birth_year: plan.birth_year,
+      retirement_year: plan.assumptions.retirement_year,
+      annual_gross_income: Math.round(year1.income),
+      annual_expenses: Math.round(year1.expenses),
+    };
   }
 
   private requirePlan(): Plan {
