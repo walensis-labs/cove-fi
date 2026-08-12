@@ -16,6 +16,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { type YearRow } from "../engine.js";
 import { type Assumptions, DEFAULT_ASSUMPTIONS } from "../model.js";
+import { listPlans, resolvePlanRef } from "../planstore.js";
 import { type FiStatus, Session } from "../session.js";
 import { thinIndices, thinMonteCarloResult, thinRows } from "../thin.js";
 
@@ -106,6 +107,16 @@ const extraIncomeShape = z.object({
   reduces_by_pretax: z.boolean().optional(),
 });
 
+// update_plan requires at least one of add/set — expressed as a refine on
+// a standalone object schema (registerTool's inputSchema wants a raw shape,
+// not a ZodObject, so this is parsed by hand in the handler rather than
+// passed as the tool's inputSchema).
+const updatePlanArgsSchema = z
+  .object({ add: z.record(z.unknown()).optional(), set: z.record(z.unknown()).optional() })
+  .refine((v) => v.add !== undefined || v.set !== undefined, {
+    message: "update_plan requires at least one of `add` or `set`",
+  });
+
 const scenarioOverridesShape = {
   retirement_year: z.number().optional(),
   inflation: z.number().optional(),
@@ -141,11 +152,75 @@ export function createServer(session: Session): McpServer {
 
   server.registerTool(
     "load_plan",
-    { description: "Load a plan TOML file into the session.", inputSchema: { path: z.string() } },
+    {
+      description:
+        "Load a plan into the session. `path` accepts either a bare saved-plan name (resolved against ~/.cove-fi/plans or COVE_FI_PLANS, e.g. \"my-plan\") or an absolute/relative path to a plan TOML file.",
+      inputSchema: { path: z.string() },
+    },
     ({ path }) =>
       guarded(() => {
-        session.loadPlanFile(path);
-        return { path, loaded: true };
+        const resolved = resolvePlanRef(path);
+        session.loadPlanFile(resolved);
+        return { path: resolved, loaded: true };
+      }),
+  );
+
+  server.registerTool(
+    "list_plans",
+    {
+      description:
+        "List discoverable saved plans (from the plan store and the current working directory), most recently touched first.",
+      inputSchema: {},
+    },
+    () =>
+      guarded(() => {
+        const plans = listPlans();
+        if (plans.length === 0) {
+          return { plans, hint: "No plans found. Use the onboard prompt, create_plan, or seed_from_ynab." };
+        }
+        return { plans };
+      }),
+  );
+
+  server.registerTool(
+    "create_plan",
+    {
+      description:
+        "Create a new plan in the session from a JSON object (accounts/incomes/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text.",
+      inputSchema: { plan: z.record(z.unknown()) },
+    },
+    ({ plan }) => guarded(() => session.createPlan(plan)),
+  );
+
+  server.registerTool(
+    "update_plan",
+    {
+      description:
+        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions`). At least one of `add`/`set` is required.",
+      inputSchema: {
+        add: z.record(z.unknown()).optional(),
+        set: z.record(z.unknown()).optional(),
+      },
+    },
+    (args) => {
+      const parsed = updatePlanArgsSchema.safeParse(args);
+      if (!parsed.success) {
+        return toolError(new Error("update_plan requires at least one of `add` or `set`"));
+      }
+      return guarded(() => session.updatePlan(parsed.data));
+    },
+  );
+
+  server.registerTool(
+    "save_plan",
+    {
+      description: "Persist the session's current plan to the plan store under `name`.",
+      inputSchema: { name: z.string(), overwrite: z.boolean().default(false) },
+    },
+    ({ name, overwrite }) =>
+      guarded(() => {
+        const path = session.saveCurrentPlan(name, overwrite);
+        return { path };
       }),
   );
 

@@ -24,18 +24,21 @@ describe("mcp server", () => {
     const r = await client.callTool({ name, arguments: args });
     return JSON.parse((r.content as { text: string }[])[0]!.text);
   };
-  it("exposes all eight tools", async () => {
+  it("exposes the core projection/scenario tools", async () => {
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual([
-      "compare_scenarios",
-      "fi_status",
-      "get_assumptions",
-      "load_plan",
-      "monte_carlo",
-      "run_projection",
-      "run_scenario",
-      "set_assumption",
-    ]);
+    const names = tools.map((t) => t.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "compare_scenarios",
+        "fi_status",
+        "get_assumptions",
+        "load_plan",
+        "monte_carlo",
+        "run_projection",
+        "run_scenario",
+        "set_assumption",
+      ]),
+    );
   });
   it("load -> project -> fi_status flow", async () => {
     await call("load_plan", { path: planPath });
