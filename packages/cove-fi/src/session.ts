@@ -28,6 +28,7 @@
 import { readFileSync } from "node:fs";
 import { run, type YearRow } from "./engine.js";
 import { type Assumptions, type Expense, type Income, IRS_LIMITS_2026, type Plan } from "./model.js";
+import { runMonteCarlo, type MonteCarloResult } from "./montecarlo.js";
 import { loadPlan } from "./planfile.js";
 
 export interface ScenarioOverrides {
@@ -186,6 +187,16 @@ export class Session {
   fiStatus(scenario?: string): FiStatus {
     const { rows, assumptions } = this.runScenario(scenario);
     return computeFiStatus(rows, assumptions);
+  }
+
+  /** Resolves the named overlay exactly like runProjection (applyOverrides),
+   * then runs the block-bootstrap Monte Carlo over the modified plan.
+   * Nominal-dollar only — see montecarlo.ts; no today's-$ conversion here. */
+  monteCarlo(scenario?: string, trials = 1000, seed?: number): MonteCarloResult {
+    const plan = this.requirePlan();
+    const overlay = this.resolveOverlay(scenario);
+    const modified = applyOverrides(plan, overlay);
+    return runMonteCarlo(modified, { trials, seed });
   }
 
   compareScenarios(names: string[]): {

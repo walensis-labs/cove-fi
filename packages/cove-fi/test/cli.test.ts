@@ -203,4 +203,40 @@ describe("cli", () => {
     expect(err.join("\n")).toMatch(/^error:/);
     expect(err.join("\n")).not.toMatch(/at .*\.ts:\d+/); // no stack trace lines
   });
+
+  it("mc prints a success-rate line and a p50 row", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { out, exitCode } = await runCli(["mc", planPath, "--trials", "25", "--seed", "7"]);
+    expect(exitCode).toBeUndefined();
+    const text = out.join("\n");
+    expect(text).toMatch(/success/i);
+    expect(text).toMatch(/p50/i);
+  });
+
+  it("mc --json parses with success_rate/trials/seed/years/percentiles", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { out, exitCode } = await runCli(["mc", planPath, "--trials", "25", "--seed", "7", "--json"]);
+    expect(exitCode).toBeUndefined();
+    expect(out.length).toBe(1);
+    const parsed = JSON.parse(out[0]!);
+    expect(typeof parsed.success_rate).toBe("number");
+    expect(parsed.trials).toBe(25);
+    expect(parsed.seed).toBe(7);
+    expect(Array.isArray(parsed.years)).toBe(true);
+    expect(Array.isArray(parsed.percentiles.p50)).toBe(true);
+  });
+
+  it("mc --trials 0 exits nonzero without calling the lib", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["mc", planPath, "--trials", "0"]);
+    expect(exitCode).toBe(1);
+    expect(err.join("\n")).toMatch(/^error:/);
+  });
+
+  it("mc --trials -5 exits nonzero", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["mc", planPath, "--trials", "-5"]);
+    expect(exitCode).toBe(1);
+    expect(err.join("\n")).toMatch(/^error:/);
+  });
 });

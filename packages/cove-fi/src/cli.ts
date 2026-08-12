@@ -18,8 +18,10 @@ import { existsSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import type { YearRow } from "./engine.js";
+import type { MonteCarloResult } from "./montecarlo.js";
 import { initTemplate } from "./planfile.js";
 import { type FiStatus, type ScenarioOverrides, Session } from "./session.js";
+import { thinMonteCarloResult } from "./thin.js";
 
 export interface Io {
   out: (s: string) => void;
@@ -159,6 +161,37 @@ function renderCompareTable(entries: CompareEntry[]): string[] {
 }
 
 // ---------------------------------------------------------------------
+// monte carlo table — one row per decade (plus the final year), so a
+// multi-decade projection stays a short human-readable table rather than
+// one line per year.
+// ---------------------------------------------------------------------
+
+function decadeIndices(years: number[]): number[] {
+  const keep = new Set<number>();
+  keep.add(0);
+  for (let i = 0; i < years.length; i++) {
+    if (years[i]! % 10 === 0) keep.add(i);
+  }
+  keep.add(years.length - 1);
+  return [...keep].sort((a, b) => a - b);
+}
+
+function renderMcTable(mc: MonteCarloResult): string[] {
+  const idx = decadeIndices(mc.years);
+  const headers = ["Year", "p10", "p50", "p90"];
+  const cellRows = idx.map((i) => [
+    String(mc.years[i]),
+    nf.format(mc.percentiles.p10[i]!),
+    nf.format(mc.percentiles.p50[i]!),
+    nf.format(mc.percentiles.p90[i]!),
+  ]);
+  const widths = headers.map((h, i) => Math.max(h.length, ...cellRows.map((row) => row[i]!.length)));
+  const headerLine = headers.map((h, i) => h.padStart(widths[i]!)).join("  ");
+  const rowLines = cellRows.map((row) => row.map((v, i) => v.padStart(widths[i]!)).join("  "));
+  return [headerLine, ...rowLines];
+}
+
+// ---------------------------------------------------------------------
 // program
 // ---------------------------------------------------------------------
 
@@ -294,6 +327,35 @@ export function buildProgram(io: Io = defaultIo): Command {
         const session = new Session();
         session.loadPlanFile(planPath);
         io.out(`plan OK: ${planPath}`);
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+  program
+    .command("mc")
+    .description("Run a Monte Carlo simulation and print success rate + per-decade percentile bands")
+    .argument("<plan>", "path to plan TOML file")
+    .option("--trials <n>", "number of trials", (v) => Number(v), 1000)
+    .option("--seed <n>", "PRNG seed (omit for a random seed)", (v) => Number(v))
+    .option("--json", "output the full (thinned) result instead of a table")
+    .action((planPath: string, opts: { trials: number; seed?: number; json?: boolean }, cmd: Command) => {
+      try {
+        // The raw runMonteCarlo/Session.monteCarlo path has no trials guard
+        // by design (ledger-noted) — validate here, before ever calling it.
+        if (!Number.isInteger(opts.trials) || opts.trials < 1) {
+          throw new Error(`invalid --trials "${opts.trials}" (must be a positive integer)`);
+        }
+        const session = new Session();
+        session.loadPlanFile(planPath);
+        const mc = session.monteCarlo(undefined, opts.trials, opts.seed);
+        if (resolveJson(opts, cmd)) {
+          const retirementYear = session.fiStatus().retirement_year;
+          io.out(JSON.stringify(thinMonteCarloResult(mc, retirementYear)));
+          return;
+        }
+        io.out(`Success rate: ${(mc.success_rate * 100).toFixed(1)}% (${mc.trials} trials, seed ${mc.seed})`);
+        for (const line of renderMcTable(mc)) io.out(line);
       } catch (err) {
         fail(err);
       }

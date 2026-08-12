@@ -16,6 +16,7 @@ import { z } from "zod";
 import { type YearRow } from "../engine.js";
 import { type Assumptions, DEFAULT_ASSUMPTIONS } from "../model.js";
 import { type FiStatus, Session } from "../session.js";
+import { thinIndices, thinMonteCarloResult, thinRows } from "../thin.js";
 
 // ---------------------------------------------------------------------
 // result helpers
@@ -69,51 +70,9 @@ function roundFiStatus(fi: FiStatus): FiStatus {
   };
 }
 
-// ---------------------------------------------------------------------
-// row thinning (run_projection and compare_scenarios' series — full
-// tables stay a CLI/--json concern). Sampling rule: first 5 years, every
-// 5th year thereafter, retirement year +/-2, and the final year. Hard
-// bound: never returns more than MAX_ROWS rows, regardless of plan
-// length — if the sampled set is still too big, it's evenly downsampled
-// (see `downsampleIndices`).
-// ---------------------------------------------------------------------
-
-const MAX_ROWS = 30;
-
-/** Evenly spaced downsample of a sorted, deduped index list to at most
- * `max` entries. Always keeps the first and last index. */
-function downsampleIndices(indices: number[], max: number): number[] {
-  if (indices.length <= max) return indices;
-  const lastIdx = indices.length - 1;
-  const step = lastIdx / (max - 1);
-  const out = new Set<number>();
-  for (let k = 0; k < max; k++) {
-    out.add(indices[Math.round(k * step)]!);
-  }
-  return [...out].sort((a, b) => a - b);
-}
-
-/** The index set thinning keeps, before the hard-bound downsample. Exposed
- * separately from `thinRows` so `compare_scenarios` can apply one shared
- * index set across `years` and every scenario's `series` (they're index-
- * aligned — every scenario shares the same start_year..end_year row
- * count; only *when* retirement happens shifts, not the row count). */
-function thinIndices(rows: YearRow[], retirementYear: number): number[] {
-  const n = rows.length;
-  if (n === 0) return [];
-  const keep = new Set<number>();
-  for (let i = 0; i < Math.min(5, n); i++) keep.add(i);
-  for (let i = 5; i < n; i += 5) keep.add(i);
-  for (let i = 0; i < n; i++) {
-    if (Math.abs(rows[i]!.year - retirementYear) <= 2) keep.add(i);
-  }
-  keep.add(n - 1);
-  return downsampleIndices([...keep].sort((a, b) => a - b), MAX_ROWS);
-}
-
-function thinRows(rows: YearRow[], retirementYear: number): YearRow[] {
-  return thinIndices(rows, retirementYear).map((i) => rows[i]!);
-}
+// row/percentile thinning (run_projection, compare_scenarios' series, and
+// monte_carlo — full tables stay a CLI/--json concern) lives in ../thin.js,
+// shared with cli.ts's `mc --json` output.
 
 // ---------------------------------------------------------------------
 // zod shapes
@@ -238,6 +197,25 @@ export function createServer(session: Session): McpServer {
   );
 
   server.registerTool(
+    "monte_carlo",
+    {
+      description:
+        "Run a block-bootstrap Monte Carlo simulation over the base plan or a named scenario; returns success rate and thinned, rounded percentile bands over net worth. Results are NOMINAL dollars — no today's-$ conversion is meaningful per-trial under sampled inflation.",
+      inputSchema: {
+        scenario: z.string().optional(),
+        trials: z.number().int().min(1).max(10_000).default(1000),
+        seed: z.number().int().optional(),
+      },
+    },
+    ({ scenario, trials, seed }) =>
+      guarded(() => {
+        const mc = session.monteCarlo(scenario, trials, seed);
+        const retirementYear = session.fiStatus(scenario).retirement_year;
+        return thinMonteCarloResult(mc, retirementYear);
+      }),
+  );
+
+  server.registerTool(
     "compare_scenarios",
     {
       description: "Compare previously-defined scenarios by name against the first as baseline.",
@@ -252,8 +230,7 @@ export function createServer(session: Session): McpServer {
         // count, so one shared index set stays aligned across `years` and
         // every scenario's `series` without re-deriving it per scenario.
         const anchorYear = session.plan!.assumptions.retirement_year;
-        const baseRows = cmp.series[names[0]!]!;
-        const indices = thinIndices(baseRows, anchorYear);
+        const indices = thinIndices(cmp.years, anchorYear);
         const years = indices.map((i) => cmp.years[i]!);
         const series: Record<string, YearRow[]> = {};
         for (const [name, rows] of Object.entries(cmp.series)) {
