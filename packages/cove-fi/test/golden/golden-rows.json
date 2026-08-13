@@ -1,0 +1,662 @@
+[
+  {
+    "year": 2026,
+    "net_worth": 328494.64154755574,
+    "liquid_net_worth": 4374.641547555744,
+    "income": 50000,
+    "expenses": 32647.2698427,
+    "taxes": 14712.6139873,
+    "withdrawals": 0,
+    "contributions": 2685.116170000001
+  },
+  {
+    "year": 2027,
+    "net_worth": 370177.57652235404,
+    "liquid_net_worth": 33031.87652235408,
+    "income": 103000,
+    "expenses": 67030.751027649,
+    "taxes": 30208.414954451004,
+    "withdrawals": 0,
+    "contributions": 5853.9840178999875
+  },
+  {
+    "year": 2028,
+    "net_worth": 414971.6762884045,
+    "liquid_net_worth": 64265.32258840461,
+    "income": 106090,
+    "expenses": 68826.97552202083,
+    "taxes": 31021.93486496588,
+    "withdrawals": 0,
+    "contributions": 6340.760113013297
+  },
+  {
+    "year": 2029,
+    "net_worth": 463082.9370727355,
+    "liquid_net_worth": 98258.22618043565,
+    "income": 109272.7,
+    "expenses": 70685.38809921766,
+    "taxes": 31863.85078392387,
+    "withdrawals": 0,
+    "contributions": 6830.108551858473
+  },
+  {
+    "year": 2030,
+    "net_worth": 514730.6197786872,
+    "liquid_net_worth": 135206.07910572767,
+    "income": 112550.88100000001,
+    "expenses": 72608.24681429594,
+    "taxes": 32735.209150278617,
+    "withdrawals": 0,
+    "contributions": 7321.537790875445
+  },
+  {
+    "year": 2031,
+    "net_worth": 570148.1068580411,
+    "liquid_net_worth": 175317.426419066,
+    "income": 115927.40743,
+    "expenses": 74597.89620105416,
+    "taxes": 33637.09749228336,
+    "withdrawals": 0,
+    "contributions": 7814.514384993992
+  },
+  {
+    "year": 2032,
+    "net_worth": 629583.8152858748,
+    "liquid_net_worth": 218814.72784242552,
+    "income": 119405.22965290002,
+    "expenses": 76656.77076879147,
+    "taxes": 34570.6461550558,
+    "withdrawals": 0,
+    "contributions": 8308.460422767443
+  },
+  {
+    "year": 2033,
+    "net_worth": 693302.169367365,
+    "liquid_net_worth": 265935.2763135522,
+    "income": 122987.38654248702,
+    "expenses": 78787.39864774542,
+    "taxes": 35537.03010589949,
+    "withdrawals": 0,
+    "contributions": 8802.750821116846
+  },
+  {
+    "year": 2034,
+    "net_worth": 761584.6373569809,
+    "liquid_net_worth": 316932.1774899959,
+    "income": 126677.00813876164,
+    "expenses": 80992.40538980473,
+    "taxes": 36537.470821112904,
+    "withdrawals": 0,
+    "contributions": 9296.710472377963
+  },
+  {
+    "year": 2035,
+    "net_worth": 818671.5228895544,
+    "liquid_net_worth": 356016.081044798,
+    "income": 130477.3183829245,
+    "expenses": 108211.5541579754,
+    "taxes": 40608.01774135794,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2036,
+    "net_worth": 895876.2433268079,
+    "liquid_net_worth": 414469.3956841402,
+    "income": 134391.63793441223,
+    "expenses": 85636.56872576936,
+    "taxes": 38645.65291764926,
+    "withdrawals": 0,
+    "contributions": 10280.668766630537
+  },
+  {
+    "year": 2037,
+    "net_worth": 978524.4701239793,
+    "liquid_net_worth": 477585.3628076639,
+    "income": 138423.3870724446,
+    "expenses": 88081.50005220396,
+    "taxes": 39756.08799847243,
+    "withdrawals": 0,
+    "contributions": 10769.039170699732
+  },
+  {
+    "year": 2038,
+    "net_worth": 1066972.1362913577,
+    "liquid_net_worth": 545685.9936910315,
+    "income": 142576.08868461792,
+    "expenses": 90612.3685100747,
+    "taxes": 40905.97165228885,
+    "withdrawals": 0,
+    "contributions": 11253.815481611105
+  },
+  {
+    "year": 2039,
+    "net_worth": 1161598.1326435488,
+    "liquid_net_worth": 619114.6916762283,
+    "income": 146853.37134515648,
+    "expenses": 93232.34970599398,
+    "taxes": 42096.78934050899,
+    "withdrawals": 0,
+    "contributions": 11734.023945165216
+  },
+  {
+    "year": 2040,
+    "net_worth": 1238528.7351856118,
+    "liquid_net_worth": 698237.6665825177,
+    "income": 151258.97248551119,
+    "expenses": 95944.74314269639,
+    "taxes": 43330.086299790535,
+    "withdrawals": 22688.845872826678,
+    "contributions": 12208.620104791771
+  },
+  {
+    "year": 2041,
+    "net_worth": 1316525.4105356927,
+    "liquid_net_worth": 763213.5041520544,
+    "income": 155796.74166007654,
+    "expenses": 114292.62824920048,
+    "taxes": 48537.180370714974,
+    "withdrawals": 7748.3290615749565,
+    "contributions": 0
+  },
+  {
+    "year": 2042,
+    "net_worth": 1407473.2546325598,
+    "liquid_net_worth": 832582.1838999598,
+    "income": 160470.64390987885,
+    "expenses": 125646.72222008966,
+    "taxes": 50002.903400080075,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2043,
+    "net_worth": 1503955.885168309,
+    "liquid_net_worth": 906644.0626771379,
+    "income": 165284.7632271752,
+    "expenses": 129376.68517328979,
+    "taxes": 51513.27065360318,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2044,
+    "net_worth": 1628622.781625453,
+    "liquid_net_worth": 1008015.798057126,
+    "income": 170243.30612399045,
+    "expenses": 107789.05754328863,
+    "taxes": 48721.211518668744,
+    "withdrawals": 0,
+    "contributions": 14027.280698934468
+  },
+  {
+    "year": 2045,
+    "net_worth": 1761792.9692586118,
+    "liquid_net_worth": 1116982.31333112,
+    "income": 175350.60530771018,
+    "expenses": 111017.71067903479,
+    "taxes": 50192.362880616056,
+    "withdrawals": 0,
+    "contributions": 14455.372439543833
+  },
+  {
+    "year": 2046,
+    "net_worth": 1904017.336335091,
+    "liquid_net_worth": 1234059.064826427,
+    "income": 180611.1234669415,
+    "expenses": 114361.47645479008,
+    "taxes": 51716.673309431775,
+    "withdrawals": 0,
+    "contributions": 14869.853242608035
+  },
+  {
+    "year": 2047,
+    "net_worth": 2055882.2713472554,
+    "liquid_net_worth": 1359795.6272497538,
+    "income": 186029.45717094975,
+    "expenses": 117824.67748852394,
+    "taxes": 53296.18577643773,
+    "withdrawals": 0,
+    "contributions": 15269.055013668665
+  },
+  {
+    "year": 2048,
+    "net_worth": 2218011.975527861,
+    "liquid_net_worth": 1494777.9523105572,
+    "income": 191610.34088607828,
+    "expenses": 121411.80784555573,
+    "taxes": 54933.027344815724,
+    "withdrawals": 0,
+    "contributions": 15651.199080925071
+  },
+  {
+    "year": 2049,
+    "net_worth": 2391070.928269793,
+    "liquid_net_worth": 1639630.778147014,
+    "income": 197358.65111266062,
+    "expenses": 125127.54020438375,
+    "taxes": 56629.412883573306,
+    "withdrawals": 0,
+    "contributions": 16014.389946887066
+  },
+  {
+    "year": 2050,
+    "net_worth": 2549564.5856087897,
+    "liquid_net_worth": 1768818.2696312224,
+    "income": 203279.41064604046,
+    "expenses": 128871.53265135695,
+    "taxes": 441.58035673635055,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2051,
+    "net_worth": 2718011.3930761474,
+    "liquid_net_worth": 1906815.9707754548,
+    "income": 209377.79296542166,
+    "expenses": 132857.18688981427,
+    "taxes": 472.49098170789506,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2052,
+    "net_worth": 2729448.9889791794,
+    "liquid_net_worth": 1886616.9452087602,
+    "income": 0,
+    "expenses": 136986.7727094488,
+    "taxes": 19660.845033139787,
+    "withdrawals": 156647.61774258857,
+    "contributions": 0
+  },
+  {
+    "year": 2053,
+    "net_worth": 2727559.1892381976,
+    "liquid_net_worth": 1851856.6957607316,
+    "income": 0,
+    "expenses": 141265.77103049902,
+    "taxes": 27430.89873417078,
+    "withdrawals": 168696.66976466982,
+    "contributions": 0
+  },
+  {
+    "year": 2054,
+    "net_worth": 2700529.517751011,
+    "liquid_net_worth": 1790674.6270279244,
+    "income": 0,
+    "expenses": 145699.88319957972,
+    "taxes": 45166.96379186971,
+    "withdrawals": 190866.84699144942,
+    "contributions": 0
+  },
+  {
+    "year": 2055,
+    "net_worth": 2663829.257497246,
+    "liquid_net_worth": 1718490.026035959,
+    "income": 0,
+    "expenses": 150295.0403185668,
+    "taxes": 46591.46249875571,
+    "withdrawals": 196886.50281732253,
+    "contributions": 0
+  },
+  {
+    "year": 2056,
+    "net_worth": 2616492.9849921404,
+    "liquid_net_worth": 1634285.5235038637,
+    "income": 0,
+    "expenses": 155057.41298588325,
+    "taxes": 48067.79802562381,
+    "withdrawals": 203125.21101150705,
+    "contributions": 0
+  },
+  {
+    "year": 2057,
+    "net_worth": 2560741.7216004715,
+    "liquid_net_worth": 1540228.1691141517,
+    "income": 0,
+    "expenses": 151602.2342407217,
+    "taxes": 46996.69261462373,
+    "withdrawals": 198598.92685534543,
+    "contributions": 0
+  },
+  {
+    "year": 2058,
+    "net_worth": 2517512.379688458,
+    "liquid_net_worth": 1457198.7986551716,
+    "income": 0,
+    "expenses": 151909.7463283129,
+    "taxes": 47092.021361777,
+    "withdrawals": 178360.1329878232,
+    "contributions": 0
+  },
+  {
+    "year": 2059,
+    "net_worth": 2492650.2519769175,
+    "liquid_net_worth": 1390984.4412833329,
+    "income": 0,
+    "expenses": 157213.3395118699,
+    "taxes": 48736.135248679675,
+    "withdrawals": 157213.3395118699,
+    "contributions": 0
+  },
+  {
+    "year": 2060,
+    "net_worth": 2458882.8930230495,
+    "liquid_net_worth": 1314252.1157124157,
+    "income": 0,
+    "expenses": 162711.43594462675,
+    "taxes": 50440.54514283429,
+    "withdrawals": 162711.43594462675,
+    "contributions": 0
+  },
+  {
+    "year": 2061,
+    "net_worth": 2415320.766210841,
+    "liquid_net_worth": 1226049.388585092,
+    "income": 0,
+    "expenses": 168411.5656328904,
+    "taxes": 52207.58534619602,
+    "withdrawals": 168411.5656328904,
+    "contributions": 0
+  },
+  {
+    "year": 2062,
+    "net_worth": 2402113.780288604,
+    "liquid_net_worth": 1166460.818935451,
+    "income": 52169.00990404811,
+    "expenses": 174321.56630890834,
+    "taxes": 55875.252169235515,
+    "withdrawals": 135899.0905145769,
+    "contributions": 0
+  },
+  {
+    "year": 2063,
+    "net_worth": 2381220.8452749206,
+    "liquid_net_worth": 1097377.4184289945,
+    "income": 53734.08020116955,
+    "expenses": 180449.5966400662,
+    "taxes": 57830.00857029867,
+    "withdrawals": 140874.44657190482,
+    "contributions": 0
+  },
+  {
+    "year": 2064,
+    "net_worth": 2351842.490571254,
+    "liquid_net_worth": 1017929.1700783373,
+    "income": 55346.10260720463,
+    "expenses": 186804.15002879204,
+    "taxes": 59856.63912916003,
+    "withdrawals": 146041.74545858582,
+    "contributions": 0
+  },
+  {
+    "year": 2065,
+    "net_worth": 2313112.74419022,
+    "liquid_net_worth": 927176.8041980793,
+    "income": 57006.485685420776,
+    "expenses": 193394.06903043552,
+    "taxes": 61957.93459827654,
+    "withdrawals": 151408.7923231231,
+    "contributions": 0
+  },
+  {
+    "year": 2066,
+    "net_worth": 2264094.0359559883,
+    "liquid_net_worth": 824106.5943041547,
+    "income": 58716.680255983396,
+    "expenses": 200228.5604176814,
+    "taxes": 64136.800124288005,
+    "withdrawals": 156983.72540914963,
+    "contributions": 0
+  },
+  {
+    "year": 2067,
+    "net_worth": 2203771.7247586995,
+    "liquid_net_worth": 707624.7728824446,
+    "income": 60478.180663662904,
+    "expenses": 207317.2109214055,
+    "taxes": 66396.26017228668,
+    "withdrawals": 162775.03086261777,
+    "contributions": 0
+  },
+  {
+    "year": 2068,
+    "net_worth": 2131048.222689586,
+    "liquid_net_worth": 576551.539690157,
+    "income": 62292.52608357279,
+    "expenses": 214670.0036792978,
+    "taxes": 68739.46367083283,
+    "withdrawals": 168791.55821874645,
+    "contributions": 0
+  },
+  {
+    "year": 2069,
+    "net_worth": 2044736.6869421322,
+    "liquid_net_worth": 429614.6333057257,
+    "income": 64161.30186607998,
+    "expenses": 222297.3354250617,
+    "taxes": 71169.68938792715,
+    "withdrawals": 175042.5366006938,
+    "contributions": 0
+  },
+  {
+    "year": 2070,
+    "net_worth": 1943554.248285459,
+    "liquid_net_worth": 265442.4345572326,
+    "income": 66086.14092206238,
+    "expenses": 230210.03445255122,
+    "taxes": 73690.35154863364,
+    "withdrawals": 181537.59166345227,
+    "contributions": 0
+  },
+  {
+    "year": 2071,
+    "net_worth": 1826114.7426895313,
+    "liquid_net_worth": 82556.5682259043,
+    "income": 68068.72514972425,
+    "expenses": 238419.37939084164,
+    "taxes": 76305.00570555395,
+    "withdrawals": 188286.76331806972,
+    "contributions": 0
+  },
+  {
+    "year": 2072,
+    "net_worth": 1811556.9432677082,
+    "liquid_net_worth": 0,
+    "income": 70110.78690421599,
+    "expenses": 246937.11882793353,
+    "taxes": 44066.72849929125,
+    "withdrawals": 82556.5682259043,
+    "contributions": 0
+  },
+  {
+    "year": 2073,
+    "net_worth": 1882207.6640551486,
+    "liquid_net_worth": 0,
+    "income": 72214.11051134247,
+    "expenses": 255775.49182258497,
+    "taxes": 19028.41811973874,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2074,
+    "net_worth": 1955613.7629532993,
+    "liquid_net_worth": 0,
+    "income": 74380.53382668275,
+    "expenses": 264947.2493456404,
+    "taxes": 19599.270663330903,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2075,
+    "net_worth": 2031882.6997084778,
+    "liquid_net_worth": 0,
+    "income": 76611.94984148323,
+    "expenses": 274465.67669419607,
+    "taxes": 20187.248783230832,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2076,
+    "net_worth": 2111126.1249971087,
+    "liquid_net_worth": 0,
+    "income": 78910.30833672773,
+    "expenses": 284344.6169240017,
+    "taxes": 20792.866246727757,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2077,
+    "net_worth": 2193460.0438719955,
+    "liquid_net_worth": 0,
+    "income": 81277.61758682955,
+    "expenses": 294598.49534766236,
+    "taxes": 21416.652234129586,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2078,
+    "net_worth": 2279004.985583003,
+    "liquid_net_worth": 0,
+    "income": 83715.94611443444,
+    "expenses": 305242.3451484717,
+    "taxes": 22059.151801153475,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2079,
+    "net_worth": 2367886.1800207403,
+    "liquid_net_worth": 0,
+    "income": 86227.42449786748,
+    "expenses": 316291.83416208316,
+    "taxes": 22720.926355188083,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2080,
+    "net_worth": 2460233.741041549,
+    "liquid_net_worth": 0,
+    "income": 88814.24723280351,
+    "expenses": 327763.29288071836,
+    "taxes": 23402.554145843726,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2081,
+    "net_worth": 2556182.8569421694,
+    "liquid_net_worth": 0,
+    "income": 91478.67464978762,
+    "expenses": 339673.7437372233,
+    "taxes": 24104.630770219035,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2082,
+    "net_worth": 2655873.9883629135,
+    "liquid_net_worth": 0,
+    "income": 94223.03488928125,
+    "expenses": 352040.93172902294,
+    "taxes": 24827.76969332561,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2083,
+    "net_worth": 2759453.0739090666,
+    "liquid_net_worth": 0,
+    "income": 97049.7259359597,
+    "expenses": 364883.356444894,
+    "taxes": 25572.602784125378,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2084,
+    "net_worth": 2867071.7437915206,
+    "liquid_net_worth": 0,
+    "income": 99961.21771403849,
+    "expenses": 378220.3055604871,
+    "taxes": 26339.78086764914,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2085,
+    "net_worth": 2978887.5417993893,
+    "liquid_net_worth": 0,
+    "income": 102960.05424545964,
+    "expenses": 392071.88987168827,
+    "taxes": 27129.974293678617,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2086,
+    "net_worth": 3095064.155929565,
+    "liquid_net_worth": 0,
+    "income": 106048.85587282343,
+    "expenses": 406459.07993821276,
+    "taxes": 27943.873522488975,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2087,
+    "net_worth": 3215771.658010818,
+    "liquid_net_worth": 0,
+    "income": 109230.32154900813,
+    "expenses": 421403.7444133015,
+    "taxes": 28782.18972816364,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2088,
+    "net_worth": 3341186.7526732394,
+    "liquid_net_worth": 0,
+    "income": 112507.2311954784,
+    "expenses": 436928.690139024,
+    "taxes": 29645.655420008556,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2089,
+    "net_worth": 3471493.0360274957,
+    "liquid_net_worth": 0,
+    "income": 115882.44813134275,
+    "expenses": 453057.7040905071,
+    "taxes": 30535.025082608816,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2090,
+    "net_worth": 3606881.2644325676,
+    "liquid_net_worth": 0,
+    "income": 119358.92157528304,
+    "expenses": 469815.59725641157,
+    "taxes": 31451.07583508708,
+    "withdrawals": 0,
+    "contributions": 0
+  },
+  {
+    "year": 2091,
+    "net_worth": 3747549.633745438,
+    "liquid_net_worth": 0,
+    "income": 122939.68922254154,
+    "expenses": 487228.2505471709,
+    "taxes": 32394.608110139696,
+    "withdrawals": 0,
+    "contributions": 0
+  }
+]
