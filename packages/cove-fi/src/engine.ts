@@ -17,15 +17,26 @@
  * this engine's behavior is checked.
  */
 import {
+  type Account,
   type Assumptions,
   COAST,
   IRS_LIMITS_2026,
   normalizePlan,
   type Plan,
+  resolveRet,
   RETIREMENT,
   RMD_TABLE,
   type TaxType,
 } from "./model.js";
+
+// A cash account's resolved growth rate is taxed as ordinary income only
+// when the household opted into the new per-class-return model for it —
+// either a per-account `ret` override or a plan-level `class_returns.cash`
+// default. Legacy cash accounts (growth-only, or untouched) stay untaxed,
+// preserving 0.3.0 behavior exactly.
+function cashTaxGated(acc: Account, a: Assumptions): boolean {
+  return acc.tax === "cash" && (acc.ret != null || a.class_returns?.cash != null);
+}
 
 export interface YearRow {
   year: number;
@@ -121,6 +132,19 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
       contributions: 0.0,
     };
     const ordRate = a.income_tax + a.local_tax;
+
+    // Resolved growth rate per account for this year: the legacy `growth`
+    // field keeps absolute precedence; otherwise resolveRet() (account ->
+    // class_returns -> plan default), with the plan default swapped for
+    // this year's scheduled rate so a `rates` schedule still drives any
+    // account that isn't opted into the new per-class-return fields.
+    // Computed once and reused by both the cash-tax gate below and the
+    // growth loop at the end of the year, so tax and growth never drift.
+    const yearRet = rateFor(y).ret;
+    const growthRate: Record<string, number> = {};
+    for (const acc of plan.accounts) {
+      growthRate[acc.name] = acc.growth ?? resolveRet(acc, { ...a, ret: yearRet });
+    }
 
     // ---------- income ----------
     let gross = 0.0;
@@ -273,6 +297,15 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
     div = div * a.dividend_rate * frac;
     taxes += div * a.cap_gains_tax;
 
+    // gated cash-interest taxation: pre-growth balance x resolved rate,
+    // taxed as ordinary income, in every year (working and retirement) —
+    // interest is income the household owes tax on now.
+    for (const acc of plan.accounts) {
+      if (cashTaxGated(acc, a)) {
+        taxes += bal[acc.name]! * growthRate[acc.name]! * frac * ordRate;
+      }
+    }
+
     // ---------- retirement: fund the gap ----------
     let tradTaken = 0.0;
     if (y > lastWorkYear) {
@@ -338,8 +371,7 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
 
     // ---------- growth ----------
     for (const acc of plan.accounts) {
-      const r = acc.growth != null ? acc.growth : rateFor(y).ret;
-      bal[acc.name]! *= 1 + r * frac;
+      bal[acc.name]! *= 1 + growthRate[acc.name]! * frac;
     }
 
     let liquid = 0.0;
