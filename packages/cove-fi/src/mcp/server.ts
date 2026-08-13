@@ -108,12 +108,21 @@ const ASSUMPTION_CITATIONS: Record<string, string> = {
   "class_returns.cash": "HYSA/T-bill nominal yield assumption; falls back to ret when unset",
 };
 
-// Explicit shapes (not a z.record(z.unknown()) passthrough): the engine
-// has no validation of its own for extra_expenses/extra_incomes — a
-// missing `amount` becomes `undefined * x = NaN`, which then poisons
-// every subsequent year's balances silently. Zod must reject a malformed
-// entry at the protocol boundary, before it ever reaches Session/engine.
-const extraExpenseShape = z.object({
+// Explicit shapes (not a bare z.record(z.unknown()) passthrough): the
+// engine has no validation of its own for extra_expenses/extra_incomes — a
+// missing `amount` becomes `undefined * x = NaN`, which then poisons every
+// subsequent year's balances silently. Zod must reject a malformed entry
+// at the protocol boundary, before it ever reaches Session/engine.
+//
+// Each shape below is registered against the MCP SDK as `.catchall(z.unknown())`
+// (permissive), never `.strict()` — see the long comment above
+// `scenarioOverridesShape` for why: the SDK's own schema-validation layer
+// runs *before* our tool handler and would otherwise silently strip (or,
+// with `.strict()`, opaquely reject with no supported-key list) any typo'd
+// field before we ever see it. The matching `*Strict` sibling is used only
+// for the handler-side re-check in run_scenario, where we control the
+// error message.
+const extraExpenseFields = {
   name: z.string(),
   amount: z.number(),
   start: z.number().int(),
@@ -121,16 +130,20 @@ const extraExpenseShape = z.object({
   growth_over_inflation: z.number().optional(),
   nominal_at_start: z.boolean().optional(),
   fund_from: z.string().optional(),
-});
+};
+const extraExpenseShape = z.object(extraExpenseFields).catchall(z.unknown());
+const extraExpenseStrict = z.object(extraExpenseFields).strict();
 
-const extraIncomeShape = z.object({
+const extraIncomeFields = {
   name: z.string(),
   amount: z.number(),
   start: z.number().int(),
   end: z.number().int(),
   taxable: z.boolean().optional(),
   reduces_by_pretax: z.boolean().optional(),
-});
+};
+const extraIncomeShape = z.object(extraIncomeFields).catchall(z.unknown());
+const extraIncomeStrict = z.object(extraIncomeFields).strict();
 
 // update_plan requires at least one of add/set — expressed as a refine on
 // a standalone object schema (registerTool's inputSchema wants a raw shape,
@@ -157,6 +170,43 @@ const scenarioOverridesShape = {
   // every account, so this override has no effect there.
   class_returns: z.record(z.enum(CLASS_RETURN_TAX_TYPES), z.number().min(RET_MIN).max(RET_MAX)).optional(),
 };
+
+// Single source of truth for the supported top-level `run_scenario`
+// override keys, used both to build the strict re-check schema below and
+// to name the supported set in its error text — Task 5 (or any future
+// change) that extends scenarioOverridesShape keeps this in sync
+// automatically instead of drifting out of a hand-maintained list.
+export const SCENARIO_OVERRIDE_KEYS = Object.keys(scenarioOverridesShape);
+
+// Why two schemas for one field: the MCP SDK parses `run_scenario`'s
+// `overrides` argument against whatever we register as its inputSchema
+// *before* our tool handler ever runs (confirmed by probing the installed
+// SDK — @modelcontextprotocol/sdk@1.30.0's McpServer.validateToolInput
+// throws a McpError from the request handler, which is caught and turned
+// into an isError CallToolResult by the SDK itself; our handler's `guarded`
+// wrapper never gets a chance to run, so it cannot rewrite that message).
+// A plain (non-strict) z.object silently *strips* unrecognized keys before
+// that point — the original bug: a typo'd override key vanishes and the
+// scenario silently runs as an unmodified copy of the base plan. Zod's
+// `.strict()` fixes the silent-strip but the SDK surfaces its raw
+// "Unrecognized key(s)..." message with no way to append the supported-key
+// list (`.strict(message)` only accepts a *static* string, which can't
+// name the actual offending key alongside it).
+//
+// So: the schema registered with the SDK (`scenarioOverridesShape` wrapped
+// in `.catchall(z.unknown())` at the registerTool call below) is
+// deliberately permissive — known fields keep their real per-field
+// validation, but unknown keys pass through untouched instead of being
+// stripped. The handler then re-validates the untouched object against
+// this strict sibling and throws its own Error (caught by `guarded`) with
+// a message naming both the offending key(s) and SCENARIO_OVERRIDE_KEYS.
+const scenarioOverridesStrict = z
+  .object({
+    ...scenarioOverridesShape,
+    extra_expenses: z.array(extraExpenseStrict).optional(),
+    extra_incomes: z.array(extraIncomeStrict).optional(),
+  })
+  .strict();
 
 // ---------------------------------------------------------------------
 // server
@@ -329,11 +379,19 @@ export function createServer(session: Session): McpServer {
         "replaces assumptions.class_returns WHOLESALE (not a per-key merge) and only affects deterministic " +
         "projections (run_projection/fi_status/compare_scenarios) — monte_carlo ignores invested return " +
         "overrides (its rates schedule dominates ret/class_returns for every account).",
-      inputSchema: { name: z.string(), overrides: z.object(scenarioOverridesShape) },
+      // Permissive on purpose — see the comment above scenarioOverridesStrict.
+      inputSchema: { name: z.string(), overrides: z.object(scenarioOverridesShape).catchall(z.unknown()) },
     },
     ({ name, overrides }) =>
       guarded(() => {
-        session.defineScenario(name, overrides);
+        const parsed = scenarioOverridesStrict.safeParse(overrides);
+        if (!parsed.success) {
+          const detail = parsed.error.issues
+            .map((i) => (i.path.length ? `${i.message} at ${i.path.join(".")}` : i.message))
+            .join("; ");
+          throw new Error(`${detail}. Supported top-level keys: ${SCENARIO_OVERRIDE_KEYS.join(", ")}`);
+        }
+        session.defineScenario(name, parsed.data);
         return { name, fi: roundFiStatus(session.fiStatus(name)) };
       }),
   );
