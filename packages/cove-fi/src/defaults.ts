@@ -54,7 +54,7 @@ export const CITED_DEFAULTS: CitedDefault[] = [
     key: "coast_multiple",
     value: 4.0,
     unit: "x trailing spend",
-    source: "4% rule, Trinity study; coast = 4x trailing spend heuristic",
+    source: "deprecated 0.4: ignored — coast is now the true CoastFIRE expectations test (see fi_multiple, retirement_year)",
   },
   {
     key: "fi_multiple",

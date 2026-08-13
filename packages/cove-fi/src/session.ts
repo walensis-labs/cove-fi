@@ -10,10 +10,14 @@
  *
  * `applyOverrides` is the one code path for turning a `Plan` +
  * `ScenarioOverrides` into a modified `Plan`: `retirement_year`,
- * `inflation`, and `ret` are written straight into the copied plan's
- * `assumptions` (so `run()` is always called with no second argument —
- * `last_work_year` and everything else the engine derives from
- * `assumptions` sees the override automatically). `savings_rate_multiplier`
+ * `inflation`, `ret`, and `class_returns` are written straight into the
+ * copied plan's `assumptions` (so `run()` is always called with no second
+ * argument — `last_work_year` and everything else the engine derives from
+ * `assumptions` sees the override automatically); `class_returns` REPLACES
+ * the plan's whole map wholesale when provided, not a per-key merge, and
+ * only ever affects deterministic runs — Monte Carlo's rates schedule
+ * dominates ret/class_returns for every account (see `engine.ts`).
+ * `savings_rate_multiplier`
  * scales every contribution rung's `amount` and `pct_of_income`; a
  * `to_limit` rung has no scalar to scale, so it is converted into a fixed
  * `amount = IRS_LIMITS_2026[annual_limit_key] * multiplier` (still in 2026
@@ -26,8 +30,8 @@
  * `retirement_year` override here moves that income's end date too.
  */
 import { readFileSync } from "node:fs";
-import { run, type YearRow } from "./engine.js";
-import { type Assumptions, type Expense, type Income, IRS_LIMITS_2026, type Plan } from "./model.js";
+import { coastTargetAtRetirement, run, runWithMeta, type YearRow } from "./engine.js";
+import { type Assumptions, type ClassReturns, type Expense, type Income, IRS_LIMITS_2026, type Plan } from "./model.js";
 import { runMonteCarlo, type MonteCarloResult } from "./montecarlo.js";
 import { loadPlan } from "./planfile.js";
 import { planFromJson } from "./planjson.js";
@@ -42,11 +46,18 @@ export interface ScenarioOverrides {
   ss_claim_year?: number;
   extra_expenses?: Expense[];
   extra_incomes?: Income[];
+  // Replaces assumptions.class_returns WHOLESALE when provided (not a
+  // per-key merge) — see applyOverrides. Deterministic projections only:
+  // Monte Carlo's rates schedule dominates ret/class_returns for every
+  // account, cash included (engine.ts), so this override has no effect
+  // there.
+  class_returns?: ClassReturns;
 }
 
 export interface FiStatus {
   fi_year: number | null;
   coast_year: number | null;
+  coast_target_at_retirement: number; // nominal $; fi_multiple x retirement-year spending (engine.coastTargetAtRetirement)
   depletion_year: number | null;
   terminal_net_worth: number;
   terminal_net_worth_todays: number;
@@ -94,6 +105,12 @@ export function applyOverrides(plan: Plan, o: ScenarioOverrides): Plan {
   if (o.retirement_year !== undefined) assumptionOverrides.retirement_year = o.retirement_year;
   if (o.inflation !== undefined) assumptionOverrides.inflation = o.inflation;
   if (o.ret !== undefined) assumptionOverrides.ret = o.ret;
+  // structuredClone'd (not aliased) so mutating the returned plan's
+  // class_returns can never reach back into the caller's ScenarioOverrides
+  // — same purity contract as extra_expenses/extra_incomes below. Spread
+  // into copy.assumptions below REPLACES the class_returns key wholesale
+  // (not a per-key merge into whatever the base plan already had).
+  if (o.class_returns !== undefined) assumptionOverrides.class_returns = structuredClone(o.class_returns);
   if (Object.keys(assumptionOverrides).length > 0) {
     copy.assumptions = { ...copy.assumptions, ...assumptionOverrides };
   }
@@ -141,20 +158,6 @@ function toTodaysDollars(rows: YearRow[], a: Assumptions): YearRow[] {
   });
 }
 
-/** Same rule as the engine's internal coast-year trigger (assumptions.coast_multiple x trailing 3-year average expenses), recomputed from finished rows. */
-function computeCoastYear(rows: YearRow[], coastMultiple: number): number | null {
-  const spendHist: number[] = [];
-  for (const r of rows) {
-    spendHist.push(r.expenses);
-    const tail = spendHist.slice(-3);
-    const avg = tail.reduce((s, v) => s + v, 0) / Math.min(spendHist.length, 3);
-    if (r.liquid_net_worth >= coastMultiple * avg) {
-      return r.year;
-    }
-  }
-  return null;
-}
-
 function computeFiYear(rows: YearRow[], fiMultiple: number): number | null {
   for (const r of rows) {
     if (r.liquid_net_worth >= fiMultiple * r.expenses) return r.year;
@@ -169,12 +172,13 @@ function computeDepletionYear(rows: YearRow[], retirementYear: number): number |
   return null;
 }
 
-function computeFiStatus(rows: YearRow[], a: Assumptions): FiStatus {
+function computeFiStatus(rows: YearRow[], a: Assumptions, coastYear: number | null, plan: Plan): FiStatus {
   const last = rows.at(-1)!;
   const factor = (1 + a.inflation) ** (last.year - a.start_year);
   return {
     fi_year: computeFiYear(rows, a.fi_multiple),
-    coast_year: computeCoastYear(rows, a.coast_multiple),
+    coast_year: coastYear,
+    coast_target_at_retirement: coastTargetAtRetirement(plan, a),
     depletion_year: computeDepletionYear(rows, a.retirement_year),
     terminal_net_worth: last.net_worth,
     terminal_net_worth_todays: last.net_worth / factor,
@@ -268,8 +272,8 @@ export class Session {
   }
 
   fiStatus(scenario?: string): FiStatus {
-    const { rows, assumptions } = this.runScenario(scenario);
-    return computeFiStatus(rows, assumptions);
+    const { rows, assumptions, coastYear, plan } = this.runScenario(scenario);
+    return computeFiStatus(rows, assumptions, coastYear, plan);
   }
 
   /** Resolves the named overlay exactly like runProjection (applyOverrides),
@@ -296,9 +300,9 @@ export class Session {
     const series: Record<string, YearRow[]> = {};
     const statuses: Record<string, FiStatus> = {};
     for (const name of names) {
-      const { rows, assumptions } = this.runScenario(name);
+      const { rows, assumptions, coastYear, plan } = this.runScenario(name);
       series[name] = rows;
-      statuses[name] = computeFiStatus(rows, assumptions);
+      statuses[name] = computeFiStatus(rows, assumptions, coastYear, plan);
     }
     const baseName = names[0]!;
     const baseStatus = statuses[baseName]!;
@@ -345,10 +349,13 @@ export class Session {
     return o;
   }
 
-  private runScenario(scenario?: string): { rows: YearRow[]; assumptions: Assumptions } {
+  private runScenario(
+    scenario?: string,
+  ): { rows: YearRow[]; assumptions: Assumptions; coastYear: number | null; plan: Plan } {
     const plan = this.requirePlan();
     const overlay = this.resolveOverlay(scenario);
     const modified = applyOverrides(plan, overlay);
-    return { rows: run(modified), assumptions: modified.assumptions };
+    const { rows, coast_year } = runWithMeta(modified);
+    return { rows, assumptions: modified.assumptions, coastYear: coast_year, plan: modified };
   }
 }

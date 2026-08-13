@@ -14,13 +14,24 @@ export interface Account {
   name: string;
   tax: TaxType;
   balance: number;
-  growth?: number | null; // null/undefined -> use plan default return
+  // Legacy per-account rate override. When set (including 0), it wins over
+  // EVERYTHING else for growth — resolveRet() and class_returns never get a
+  // say. null/undefined -> fall through to `ret` / resolveRet().
+  growth?: number | null;
   liquid?: boolean;
   penalty_age?: number; // early-withdrawal age
   penalty_rate?: number;
   rmd?: boolean;
   basis?: number | null; // taxable accounts: starting cost basis
+  // New-style override: participates in resolveRet() precedence (account ->
+  // class_returns -> plan default) AND, for cash accounts, gates ordinary-
+  // income taxation of the resolved growth rate (see cashTaxGated() in
+  // engine.ts). Ignored for growth whenever `growth` above is set.
+  ret?: number | null;
 }
+
+/** Per-tax-class default nominal return overrides (assumptions.class_returns). */
+export type ClassReturns = Partial<Record<TaxType, number>>;
 
 export interface Income {
   name: string;
@@ -89,8 +100,9 @@ export interface Assumptions {
   end_year: number;
   first_year_fraction: number; // partial first year (start mid-year)
   retirement_year: number;
-  coast_multiple: number; // x spending, 3yr avg LNW
+  coast_multiple: number; // deprecated 0.4: coast is now the true CoastFIRE test; this knob is ignored
   fi_multiple: number;
+  class_returns?: ClassReturns; // per-tax-class nominal return defaults; see resolveRet()
 }
 
 export const DEFAULT_ASSUMPTIONS: Assumptions = {
@@ -234,4 +246,17 @@ export function normalizePlan(plan: Plan): Plan {
       : (plan.house ?? null),
     drawdown_order: plan.drawdown_order ?? [...DEFAULT_DRAWDOWN_ORDER],
   };
+}
+
+/**
+ * Resolve the nominal return an account grows at, in precedence order:
+ * an explicit per-account `ret` override, then the plan's per-tax-class
+ * default (`class_returns`), then the plan's global default (`a.ret`).
+ *
+ * NOTE: this does not consider the legacy `growth` field — engine.ts's
+ * growth loop applies `acc.growth ?? resolveRet(acc, a)`, since `growth`
+ * keeps absolute precedence for backward compatibility.
+ */
+export function resolveRet(acc: Account, a: Assumptions): number {
+  return acc.ret ?? a.class_returns?.[acc.tax] ?? a.ret;
 }

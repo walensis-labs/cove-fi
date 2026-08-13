@@ -1,0 +1,213 @@
+{
+  "birth_year": 1990,
+  "accounts": [
+    {
+      "name": "cash",
+      "tax": "cash",
+      "balance": 15000,
+      "growth": 0,
+      "liquid": true,
+      "penalty_age": 60,
+      "penalty_rate": 0.1,
+      "rmd": false,
+      "basis": null
+    },
+    {
+      "name": "brokerage",
+      "tax": "taxable",
+      "balance": 40000,
+      "basis": 16000,
+      "growth": null,
+      "liquid": true,
+      "penalty_age": 60,
+      "penalty_rate": 0.1,
+      "rmd": false
+    },
+    {
+      "name": "401k",
+      "tax": "trad",
+      "balance": 120000,
+      "rmd": true,
+      "growth": null,
+      "liquid": true,
+      "penalty_age": 60,
+      "penalty_rate": 0.1,
+      "basis": null
+    },
+    {
+      "name": "roth",
+      "tax": "roth",
+      "balance": 30000,
+      "growth": null,
+      "liquid": true,
+      "penalty_age": 60,
+      "penalty_rate": 0.1,
+      "rmd": false,
+      "basis": null
+    },
+    {
+      "name": "hsa",
+      "tax": "hsa",
+      "balance": 6000,
+      "growth": null,
+      "liquid": true,
+      "penalty_age": 60,
+      "penalty_rate": 0.1,
+      "rmd": false,
+      "basis": null
+    },
+    {
+      "name": "college529",
+      "tax": "529",
+      "balance": 12000,
+      "liquid": false,
+      "growth": null,
+      "penalty_age": 60,
+      "penalty_rate": 0.1,
+      "rmd": false,
+      "basis": null
+    }
+  ],
+  "incomes": [
+    {
+      "name": "salary",
+      "amount": 100000,
+      "start": 2026,
+      "end": 2051,
+      "reduces_by_pretax": true,
+      "taxable": true
+    }
+  ],
+  "social_security": [
+    {
+      "pia_monthly": 2000,
+      "claim_year": 2062,
+      "haircut": 0.75,
+      "taxable_fraction": 0.85
+    }
+  ],
+  "expenses": [
+    {
+      "name": "base",
+      "amount": 40000,
+      "start": 2026,
+      "end": 2091,
+      "growth_over_inflation": 0,
+      "nominal_at_start": false,
+      "fund_from": null
+    },
+    {
+      "name": "healthcare",
+      "amount": 6000,
+      "start": 2026,
+      "end": 2091,
+      "growth_over_inflation": 0.02,
+      "nominal_at_start": false,
+      "fund_from": null
+    },
+    {
+      "name": "car",
+      "amount": 25000,
+      "start": 2035,
+      "end": 2035,
+      "nominal_at_start": true,
+      "growth_over_inflation": 0,
+      "fund_from": null
+    },
+    {
+      "name": "college",
+      "amount": 15000,
+      "start": 2040,
+      "end": 2043,
+      "fund_from": "college529",
+      "growth_over_inflation": 0,
+      "nominal_at_start": false
+    }
+  ],
+  "contributions": [
+    {
+      "account": "401k",
+      "start": 2026,
+      "end": 2091,
+      "to_limit": true,
+      "annual_limit_key": "401k",
+      "pretax": true,
+      "employer_match_pct": 0.04,
+      "amount": null,
+      "pct_of_income": null,
+      "employer_match_flat": null
+    },
+    {
+      "account": "hsa",
+      "start": 2026,
+      "end": 2091,
+      "to_limit": true,
+      "annual_limit_key": "hsa_family",
+      "pretax": true,
+      "amount": null,
+      "pct_of_income": null,
+      "employer_match_pct": null,
+      "employer_match_flat": null
+    },
+    {
+      "account": "roth",
+      "start": 2026,
+      "end": 2091,
+      "amount": 7000,
+      "pct_of_income": null,
+      "annual_limit_key": null,
+      "to_limit": false,
+      "employer_match_pct": null,
+      "employer_match_flat": null,
+      "pretax": false
+    },
+    {
+      "account": "brokerage",
+      "start": 2026,
+      "end": 2091,
+      "pct_of_income": 0.1,
+      "amount": null,
+      "annual_limit_key": null,
+      "to_limit": false,
+      "employer_match_pct": null,
+      "employer_match_flat": null,
+      "pretax": false
+    }
+  ],
+  "house": {
+    "value": 300000,
+    "appreciation": 0.039,
+    "mortgage": {
+      "balance": 220000,
+      "rate": 0.045,
+      "payment_monthly": 1100
+    },
+    "property_tax_rate": 0.009,
+    "insurance_rate": 0.003,
+    "maintenance_rate": 0.007,
+    "hoa_monthly": 30
+  },
+  "assumptions": {
+    "inflation": 0.03,
+    "ret": 0.07,
+    "dividend_rate": 0.015,
+    "income_tax": 0.3,
+    "local_tax": 0.01,
+    "cap_gains_tax": 0.15,
+    "start_year": 2026,
+    "end_year": 2091,
+    "first_year_fraction": 0.5,
+    "retirement_year": 2050,
+    "coast_multiple": 4,
+    "fi_multiple": 25
+  },
+  "drawdown_order": [
+    "cash-excess",
+    "529",
+    "taxable",
+    "hsa",
+    "trad",
+    "roth",
+    "cash-all"
+  ]
+}

@@ -49,7 +49,10 @@ internally-chosen target.
   Savings: Choosing a Withdrawal Rate That Is Sustainable."* AAII Journal
   — the "Trinity study." Source of the ~98% historical success rate for a
   4% initial withdrawal, 100% stocks, 30-year horizon, and of the
-  `fi_multiple = 25` (`1/0.04`) and `coast_multiple` defaults.
+  `fi_multiple = 25` (`1/0.04`) default. (`coast_multiple` is 0.4-
+  deprecated and read nowhere — coast now derives from this same
+  `fi_multiple` threshold, projected to `retirement_year`, rather than its
+  own separate multiple.)
 - Bengen, W. P. (1994). *"Determining Withdrawal Rates Using Historical
   Data."* Journal of Financial Planning. Establishes the direction the
   benchmark test also checks: success rate falls as the withdrawal rate
@@ -112,10 +115,17 @@ Stated plainly, not buried:
   `cap_gains_tax` are single flat rates applied to the whole relevant
   base — no brackets, no phase-outs, no filing-status logic. A real
   progressive-bracket implementation (the `FlatTax` seam) is future work.
-- **Single-asset Monte Carlo.** The bootstrap draws one `{ ret, inflation
-  }` pair per year from historical S&P 500 / CPI-U data — there is no
-  portfolio mix (stocks/bonds/cash), no per-asset-class correlation
-  modeling, and no glide path.
+- **Two-asset-class Monte Carlo, no glide path.** As of 0.4, the
+  bootstrap draws `{ ret, inflation, cash_ret }` per sampled year — an
+  equity return (S&P 500) and a T-bill return, from the SAME historical
+  index, so a trial's cash sleeve stays correlated with that trial's
+  equity/inflation path. Cash-class accounts follow `cash_ret`; every
+  other tax class follows the equity `ret`. That's a partition by
+  account class, not a real portfolio mix: there's still no bond series,
+  no user-defined asset allocation within an invested (non-cash) class,
+  and no glide path (allocation shifting over time) — an account is
+  either "equity" or "cash" for the whole run. Broader per-class
+  portfolio mixes are planned, not yet implemented.
 - **No state tax or IRMAA.** Federal-shaped flat rates only; state income
   tax and Medicare IRMAA surcharges are not modeled.
 - **Working-year deficits are not funded.** The contribution waterfall is

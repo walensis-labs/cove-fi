@@ -130,18 +130,38 @@ invariants, IRS-table pins, and a Monte Carlo benchmark against the
 Trinity-study withdrawal-rate literature. See
 [`docs/VALIDATION.md`](../../docs/VALIDATION.md) for the full methodology,
 citations, and an honest accounting of current limitations (flat effective
-tax model, single-asset Monte Carlo, no state tax/IRMAA). For the engine's
+tax model, equity + correlated T-bill Monte Carlo with portfolio mixes
+planned, no state tax/IRMAA). For the engine's
 actual rules — the contribution waterfall, drawdown order, sentinels — see
 [`docs/SEMANTICS.md`](../../docs/SEMANTICS.md).
+
+As of 0.4, per-account (`ret`) and per-tax-class (`assumptions.class_returns`)
+return overrides sit alongside the global `ret` default — and opting a
+cash account into either taxes its growth as ordinary income every year,
+rather than letting it compound tax-free. `monte_carlo` treats cash the
+same way: cash-class accounts follow a historical T-bill path correlated
+with the same sampled market years instead of the equity path everything
+else rides, so a cash-heavy plan shows visibly narrower percentile bands.
+And `coast_year` is now a true CoastFIRE expectations test — projecting
+each account's current balance forward at its own resolved rate to
+`retirement_year` and comparing against `fi_multiple x` projected
+retirement spending — instead of the old trailing-spend x `coast_multiple`
+heuristic, which is deprecated and ignored.
 
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
   instead of a single deterministic path. **Shipped.**
-- **0.3** — integrations (third-party import/export), portfolio mixes.
+- **0.3** — conversational onboarding (guided interview, plan discovery,
+  propose-only YNAB seeding). **Shipped.**
+- **0.4** — per-account/per-tax-class return overrides, gated cash-interest
+  taxation, correlated T-bill Monte Carlo cash sleeves, true CoastFIRE
+  `coast_year`. **This release.**
+- **Next** — integrations (third-party import/export), bond
+  series/portfolio mixes.
 
 Not yet: bond series/portfolio mixes, progressive-bracket taxes,
-third-party import/export integrations (targeted for 0.3).
+third-party import/export integrations.
 
 ## License
 

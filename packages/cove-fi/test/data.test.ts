@@ -21,4 +21,24 @@ describe("vendored return series", () => {
       expect(r.inflation).toBeGreaterThan(-0.15); expect(r.inflation).toBeLessThan(0.25);
     }
   });
+  it("tbill spot-checks match published values (transcription tripwire)", () => {
+    const y = (n: number) => RETURNS_ANNUAL.find(r => r.year === n)!;
+    // 1981: Damodaran histretSP.xls "Returns by year" and the published histretSP.html table both
+    // give 14.04%, confirmed against two independently-fetched sources on 2026-08-13.
+    expect(y(1981).tbill).toBeCloseTo(0.1404, 2);
+    expect(y(2021).tbill).toBeCloseTo(0.0004, 2);
+    expect(y(1940).tbill).toBeCloseTo(0.0004, 2);
+    expect(y(2007).tbill).toBeCloseTo(0.0448, 2);
+  });
+  it("tbill values are in a sane range", () => {
+    for (const r of RETURNS_ANNUAL) {
+      expect(r.tbill).toBeGreaterThan(-0.01);
+      expect(r.tbill).toBeLessThan(0.2);
+    }
+  });
+  it("mean tbill 1928-2025 is in a sane historical range", () => {
+    const mean = RETURNS_ANNUAL.reduce((sum, r) => sum + r.tbill, 0) / RETURNS_ANNUAL.length;
+    expect(mean).toBeGreaterThan(0.032);
+    expect(mean).toBeLessThan(0.038);
+  });
 });

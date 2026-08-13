@@ -37,8 +37,11 @@ export function mulberry32(seed: number): () => number {
  * block would run past the end of history — this reuses early history to
  * pad the tail of long blocks rather than ever reading out of bounds),
  * until the schedule covers every requested year, then truncate. Each
- * sampled historical entry supplies { ret: sp500, inflation } for the next
- * requested year in order.
+ * sampled historical entry supplies { ret: sp500, inflation, cash_ret:
+ * tbill } for the next requested year in order — cash_ret comes from the
+ * SAME sampled index as ret/inflation, so a cash sleeve's path stays
+ * historically correlated with the equity/inflation path in the same
+ * trial-year rather than being drawn independently.
  */
 export function sampleSchedule(years: number[], rng: () => number): YearRates[] {
   const n = RETURNS_ANNUAL.length;
@@ -47,7 +50,7 @@ export function sampleSchedule(years: number[], rng: () => number): YearRates[] 
     const start = Math.floor(rng() * n);
     for (let i = 0; i < 5 && out.length < years.length; i++) {
       const src = RETURNS_ANNUAL[(start + i) % n]!;
-      out.push({ year: years[out.length]!, ret: src.sp500, inflation: src.inflation });
+      out.push({ year: years[out.length]!, ret: src.sp500, inflation: src.inflation, cash_ret: src.tbill });
     }
   }
   return out;
