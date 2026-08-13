@@ -16,7 +16,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { CITED_DEFAULTS } from "../defaults.js";
 import { type YearRow } from "../engine.js";
-import { type Assumptions, DEFAULT_ASSUMPTIONS } from "../model.js";
+import { type Assumptions, DEFAULT_ASSUMPTIONS, type TaxType } from "../model.js";
+import { isValidRet, RET_MAX, RET_MIN } from "../planjson.js";
 import { listPlans, resolvePlanRef } from "../planstore.js";
 import { seedFromYnab } from "../seed/ynab.js";
 import { type FiStatus, Session } from "../session.js";
@@ -89,12 +90,23 @@ function roundFiStatus(fi: FiStatus): FiStatus {
 
 const ASSUMPTIONS_KEYS = Object.keys(DEFAULT_ASSUMPTIONS) as [keyof Assumptions, ...(keyof Assumptions)[]];
 
+// Dotted set_assumption keys for the per-tax-class return overrides
+// (assumptions.class_returns.<class>) — class_returns itself has no plain
+// numeric value (it's a map), so it can't join ASSUMPTIONS_KEYS above;
+// these are handled specially in the set_assumption handler below.
+const CLASS_RETURN_TAX_TYPES = ["cash", "taxable", "trad", "roth", "hsa", "529"] as const satisfies readonly TaxType[];
+const CLASS_RETURN_KEYS = CLASS_RETURN_TAX_TYPES.map((t) => `class_returns.${t}` as const);
+const SET_ASSUMPTION_KEYS = [...ASSUMPTIONS_KEYS, ...CLASS_RETURN_KEYS] as [string, ...string[]];
+
 // get_assumptions pairs each assumption with its citation where one
 // exists (CITED_DEFAULTS is a strict subset of Assumptions' keys — e.g.
 // retirement_year/start_year have no citation and are simply absent here).
-const ASSUMPTION_CITATIONS: Record<string, string> = Object.fromEntries(
-  CITED_DEFAULTS.map((d) => [d.key, d.source]),
-);
+// class_returns.cash has no CITED_DEFAULTS entry (it has no default value —
+// it's opt-in, unset by default) so its citation is added by hand.
+const ASSUMPTION_CITATIONS: Record<string, string> = {
+  ...Object.fromEntries(CITED_DEFAULTS.map((d) => [d.key, d.source])),
+  "class_returns.cash": "HYSA/T-bill nominal yield assumption; falls back to ret when unset",
+};
 
 // Explicit shapes (not a z.record(z.unknown()) passthrough): the engine
 // has no validation of its own for extra_expenses/extra_incomes — a
@@ -139,6 +151,11 @@ const scenarioOverridesShape = {
   ss_claim_year: z.number().optional(),
   extra_expenses: z.array(extraExpenseShape).optional(),
   extra_incomes: z.array(extraIncomeShape).optional(),
+  // Replaces assumptions.class_returns WHOLESALE (not a per-key merge) —
+  // see applyOverrides in session.ts. Deterministic run_projection/fi_status
+  // only: monte_carlo's rates schedule dominates ret/class_returns for
+  // every account, so this override has no effect there.
+  class_returns: z.record(z.enum(CLASS_RETURN_TAX_TYPES), z.number().min(RET_MIN).max(RET_MAX)).optional(),
 };
 
 // ---------------------------------------------------------------------
@@ -199,7 +216,7 @@ export function createServer(session: Session): McpServer {
     "create_plan",
     {
       description:
-        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars).",
+        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars). Growth overrides: an account's `ret` and `assumptions.class_returns.<tax-class>` (both finite, in [-0.5, 0.5]) let you set nominal return by account or by tax class, falling back to `assumptions.ret` when unset.",
       inputSchema: { plan: z.record(z.unknown()) },
     },
     ({ plan }) => guarded(() => session.createPlan(plan)),
@@ -209,7 +226,7 @@ export function createServer(session: Session): McpServer {
     "update_plan",
     {
       description:
-        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions`). At least one of `add`/`set` is required (amounts are annual, today's dollars).",
+        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions` — note `set.assumptions.class_returns`, being one key of that shallow merge, is replaced WHOLESALE, not merged per tax-class). At least one of `add`/`set` is required (amounts are annual, today's dollars).",
       inputSchema: {
         add: z.record(z.unknown()).optional(),
         set: z.record(z.unknown()).optional(),
@@ -254,13 +271,25 @@ export function createServer(session: Session): McpServer {
   server.registerTool(
     "set_assumption",
     {
-      description: "Mutate one assumption on the loaded plan.",
-      inputSchema: { key: z.enum(ASSUMPTIONS_KEYS), value: z.number() },
+      description:
+        "Mutate one assumption on the loaded plan. `key` also accepts the dotted per-tax-class return " +
+        "overrides `class_returns.cash|taxable|trad|roth|hsa|529` — each creates/updates one entry in " +
+        "assumptions.class_returns (value must be finite, in [-0.5, 0.5]); use update_plan's " +
+        "`set.assumptions.class_returns` instead to replace the whole map at once.",
+      inputSchema: { key: z.enum(SET_ASSUMPTION_KEYS), value: z.number() },
     },
     ({ key, value }) =>
       guarded(() => {
         if (!session.plan) throw new Error("no plan loaded — call load_plan first");
-        session.plan.assumptions[key] = value;
+        if (key.startsWith("class_returns.")) {
+          const cls = key.slice("class_returns.".length) as TaxType;
+          if (!isValidRet(value)) {
+            throw new Error(`class_returns.${cls} must be a finite number in [${RET_MIN}, ${RET_MAX}] (got ${value})`);
+          }
+          session.plan.assumptions.class_returns = { ...session.plan.assumptions.class_returns, [cls]: value };
+          return session.plan.assumptions;
+        }
+        session.plan.assumptions[key as keyof Assumptions] = value;
         return session.plan.assumptions;
       }),
   );
@@ -295,7 +324,11 @@ export function createServer(session: Session): McpServer {
   server.registerTool(
     "run_scenario",
     {
-      description: "Define a named scenario from override deltas and return its FI status.",
+      description:
+        "Define a named scenario from override deltas and return its FI status. `overrides.class_returns` " +
+        "replaces assumptions.class_returns WHOLESALE (not a per-key merge) and only affects deterministic " +
+        "projections (run_projection/fi_status/compare_scenarios) — monte_carlo ignores invested return " +
+        "overrides (its rates schedule dominates ret/class_returns for every account).",
       inputSchema: { name: z.string(), overrides: z.object(scenarioOverridesShape) },
     },
     ({ name, overrides }) =>
@@ -309,7 +342,7 @@ export function createServer(session: Session): McpServer {
     "monte_carlo",
     {
       description:
-        "Run a block-bootstrap Monte Carlo simulation over the base plan or a named scenario; returns success rate and thinned, rounded percentile bands over net worth. Results are NOMINAL dollars — no today's-$ conversion is meaningful per-trial under sampled inflation. Note: ret/inflation scenario overrides are ignored — per-year rates come from sampled market history; retirement_year, savings, social-security, and extra income/expense overrides all apply. Cash-class accounts follow a historical T-bill path correlated with the same sampled years as the equity/inflation path (not the equity path itself) — expect narrower percentile bands for cash-heavy plans.",
+        "Run a block-bootstrap Monte Carlo simulation over the base plan or a named scenario; returns success rate and thinned, rounded percentile bands over net worth. Results are NOMINAL dollars — no today's-$ conversion is meaningful per-trial under sampled inflation. Note: ret/inflation/class_returns scenario overrides are ignored — per-year rates come from sampled market history; retirement_year, savings, social-security, and extra income/expense overrides all apply. Cash-class accounts follow a historical T-bill path correlated with the same sampled years as the equity/inflation path (not the equity path itself) — expect narrower percentile bands for cash-heavy plans.",
       inputSchema: {
         scenario: z.string().optional(),
         trials: z.number().int().min(1).max(10_000).default(1000),

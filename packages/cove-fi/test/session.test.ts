@@ -27,6 +27,7 @@ describe("applyOverrides — purity", () => {
         ss_claim_year: 2065,
         extra_expenses: [{ name: "extra", amount: 1000, start: 2030, end: 2035 }],
         extra_incomes: [{ name: "side", amount: 5000, start: 2026, end: 2030 }],
+        class_returns: { cash: 0.02, taxable: 0.05 },
       }),
     ).not.toThrow();
   });
@@ -50,6 +51,29 @@ describe("applyOverrides — assumption-level overrides", () => {
     expect(out.assumptions.ret).toBe(0.08);
     // base plan's assumptions unaffected
     expect(plan.assumptions.retirement_year).toBe(2050);
+  });
+});
+
+describe("applyOverrides — class_returns", () => {
+  it("replaces the whole map wholesale, not a per-key merge", () => {
+    const plan = syntheticPlan();
+    plan.assumptions.class_returns = { cash: 0.02, taxable: 0.03 };
+    const out = applyOverrides(plan, { class_returns: { roth: 0.09 } });
+    expect(out.assumptions.class_returns).toEqual({ roth: 0.09 });
+  });
+
+  it("leaves assumptions.class_returns absent when the plan has none and no override is given", () => {
+    const plan = syntheticPlan();
+    const out = applyOverrides(plan, {});
+    expect(out.assumptions.class_returns).toBeUndefined();
+  });
+
+  it("does not alias the override's class_returns object into the returned plan", () => {
+    const plan = syntheticPlan();
+    const o = { class_returns: { cash: 0.02 } };
+    const out = applyOverrides(plan, o);
+    out.assumptions.class_returns!.cash = 0.99;
+    expect(o.class_returns.cash).toBe(0.02);
   });
 });
 

@@ -10,10 +10,14 @@
  *
  * `applyOverrides` is the one code path for turning a `Plan` +
  * `ScenarioOverrides` into a modified `Plan`: `retirement_year`,
- * `inflation`, and `ret` are written straight into the copied plan's
- * `assumptions` (so `run()` is always called with no second argument —
- * `last_work_year` and everything else the engine derives from
- * `assumptions` sees the override automatically). `savings_rate_multiplier`
+ * `inflation`, `ret`, and `class_returns` are written straight into the
+ * copied plan's `assumptions` (so `run()` is always called with no second
+ * argument — `last_work_year` and everything else the engine derives from
+ * `assumptions` sees the override automatically); `class_returns` REPLACES
+ * the plan's whole map wholesale when provided, not a per-key merge, and
+ * only ever affects deterministic runs — Monte Carlo's rates schedule
+ * dominates ret/class_returns for every account (see `engine.ts`).
+ * `savings_rate_multiplier`
  * scales every contribution rung's `amount` and `pct_of_income`; a
  * `to_limit` rung has no scalar to scale, so it is converted into a fixed
  * `amount = IRS_LIMITS_2026[annual_limit_key] * multiplier` (still in 2026
@@ -27,7 +31,7 @@
  */
 import { readFileSync } from "node:fs";
 import { coastTargetAtRetirement, run, runWithMeta, type YearRow } from "./engine.js";
-import { type Assumptions, type Expense, type Income, IRS_LIMITS_2026, type Plan } from "./model.js";
+import { type Assumptions, type ClassReturns, type Expense, type Income, IRS_LIMITS_2026, type Plan } from "./model.js";
 import { runMonteCarlo, type MonteCarloResult } from "./montecarlo.js";
 import { loadPlan } from "./planfile.js";
 import { planFromJson } from "./planjson.js";
@@ -42,6 +46,12 @@ export interface ScenarioOverrides {
   ss_claim_year?: number;
   extra_expenses?: Expense[];
   extra_incomes?: Income[];
+  // Replaces assumptions.class_returns WHOLESALE when provided (not a
+  // per-key merge) — see applyOverrides. Deterministic projections only:
+  // Monte Carlo's rates schedule dominates ret/class_returns for every
+  // account, cash included (engine.ts), so this override has no effect
+  // there.
+  class_returns?: ClassReturns;
 }
 
 export interface FiStatus {
@@ -95,6 +105,12 @@ export function applyOverrides(plan: Plan, o: ScenarioOverrides): Plan {
   if (o.retirement_year !== undefined) assumptionOverrides.retirement_year = o.retirement_year;
   if (o.inflation !== undefined) assumptionOverrides.inflation = o.inflation;
   if (o.ret !== undefined) assumptionOverrides.ret = o.ret;
+  // structuredClone'd (not aliased) so mutating the returned plan's
+  // class_returns can never reach back into the caller's ScenarioOverrides
+  // — same purity contract as extra_expenses/extra_incomes below. Spread
+  // into copy.assumptions below REPLACES the class_returns key wholesale
+  // (not a per-key merge into whatever the base plan already had).
+  if (o.class_returns !== undefined) assumptionOverrides.class_returns = structuredClone(o.class_returns);
   if (Object.keys(assumptionOverrides).length > 0) {
     copy.assumptions = { ...copy.assumptions, ...assumptionOverrides };
   }

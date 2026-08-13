@@ -21,10 +21,12 @@ import { COAST, type Plan, RETIREMENT, type TaxType, normalizePlan } from "./mod
 const TAX_TYPES: readonly TaxType[] = ["cash", "taxable", "trad", "roth", "hsa", "529"];
 const LIMIT_KEYS = new Set(["401k", "ira", "hsa_family"]);
 // Nominal-return bound shared by account.ret and assumptions.class_returns
-// values (design doc: "finite, in [-0.5, 0.5], list all offenders").
-const RET_MIN = -0.5;
-const RET_MAX = 0.5;
-function isValidRet(v: unknown): v is number {
+// values (design doc: "finite, in [-0.5, 0.5], list all offenders") — also
+// reused by mcp/server.ts's set_assumption for the dotted class_returns.*
+// keys, so the rule can't drift between the two validation sites.
+export const RET_MIN = -0.5;
+export const RET_MAX = 0.5;
+export function isValidRet(v: unknown): v is number {
   return isNum(v) && v >= RET_MIN && v <= RET_MAX;
 }
 

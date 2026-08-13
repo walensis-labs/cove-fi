@@ -78,6 +78,39 @@ describe("mcp server", () => {
     const r = await client.callTool({ name: "set_assumption", arguments: { key: "bogus_key", value: 1 } });
     expect(r.isError).toBe(true);
   });
+  it("set_assumption accepts a dotted class_returns key, round-trips through get_assumptions, and changes run_projection", async () => {
+    await call("load_plan", { path: planPath });
+    const before = await call("run_projection");
+    await call("set_assumption", { key: "class_returns.taxable", value: 0.02 });
+    const a = await call("get_assumptions");
+    expect(a.assumptions.class_returns).toEqual({ taxable: 0.02 });
+    const after = await call("run_projection");
+    // Compare an early row (thinning always keeps the first 5 years), not
+    // the last: by the final year both projections have drawn the taxable
+    // bucket down to the same illiquid-only floor, masking the growth-rate
+    // difference (mirrors the mid-window comparison in the extra_expenses
+    // test above).
+    const beforeEarly = before.rows.find((r: { year: number }) => r.year === 2027);
+    const afterEarly = after.rows.find((r: { year: number }) => r.year === 2027);
+    expect(beforeEarly).toBeDefined();
+    expect(afterEarly).toBeDefined();
+    expect(afterEarly.net_worth).not.toBe(beforeEarly.net_worth);
+  });
+  it("dotted set_assumption keys accumulate into the same class_returns map", async () => {
+    await call("load_plan", { path: planPath });
+    await call("set_assumption", { key: "class_returns.cash", value: 0.03 });
+    await call("set_assumption", { key: "class_returns.taxable", value: 0.04 });
+    const a = await call("get_assumptions");
+    expect(a.assumptions.class_returns).toEqual({ cash: 0.03, taxable: 0.04 });
+  });
+  it("set_assumption rejects an out-of-range dotted class_returns value with a structured error listing the rule", async () => {
+    await call("load_plan", { path: planPath });
+    const r = await client.callTool({ name: "set_assumption", arguments: { key: "class_returns.cash", value: 0.9 } });
+    expect(r.isError).toBe(true);
+    const body = JSON.parse((r.content as { text: string }[])[0]!.text);
+    expect(body.error).toMatch(/-0.5/);
+    expect(body.error).toMatch(/0.5/);
+  });
   it("get_assumptions returns { assumptions, citations }: assumptions include a value changed via set_assumption, citations come from CITED_DEFAULTS only", async () => {
     await call("load_plan", { path: planPath });
     await call("set_assumption", { key: "ret", value: 0.42 });
@@ -90,6 +123,11 @@ describe("mcp server", () => {
     // retirement_year has no entry in CITED_DEFAULTS — it must be absent,
     // not fabricated.
     expect(a.citations).not.toHaveProperty("retirement_year");
+  });
+  it("get_assumptions has a citation for class_returns.cash", async () => {
+    await call("load_plan", { path: planPath });
+    const a = await call("get_assumptions");
+    expect(a.citations["class_returns.cash"]).toMatch(/HYSA|T-bill/);
   });
   it("run_scenario rejects an extra_expenses entry missing `amount` as a structured error, not a NaN-riddled projection", async () => {
     await call("load_plan", { path: planPath });
@@ -128,6 +166,24 @@ describe("mcp server", () => {
         expect(Number.isNaN(v as number)).toBe(false);
       }
     }
+  });
+  it("scenario class_returns override changes deterministic run_projection but not monte_carlo (fixed seed)", async () => {
+    await call("load_plan", { path: planPath });
+    const baseProj = await call("run_projection");
+    await call("run_scenario", { name: "hot-taxable", overrides: { class_returns: { taxable: 0.5 } } });
+    const scenProj = await call("run_projection", { scenario: "hot-taxable" });
+    expect(scenProj.rows.at(-1)!.net_worth).not.toBe(baseProj.rows.at(-1)!.net_worth);
+
+    const baseMc = await call("monte_carlo", { trials: 50, seed: 7 });
+    const scenMc = await call("monte_carlo", { scenario: "hot-taxable", trials: 50, seed: 7 });
+    expect(scenMc).toEqual(baseMc);
+  });
+  it("update_plan set assumptions.class_returns replaces wholesale, not a per-key merge", async () => {
+    await call("load_plan", { path: planPath });
+    await call("update_plan", { set: { assumptions: { class_returns: { cash: 0.03 } } } });
+    await call("update_plan", { set: { assumptions: { class_returns: { taxable: 0.06 } } } });
+    const a = await call("get_assumptions");
+    expect(a.assumptions.class_returns).toEqual({ taxable: 0.06 });
   });
   it("compare_scenarios series is thinned to <=30 rows per scenario", async () => {
     await call("load_plan", { path: planPath });
