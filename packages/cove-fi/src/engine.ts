@@ -53,6 +53,13 @@ export interface YearRates {
   year: number;
   ret: number;
   inflation: number;
+  // Historical T-bill rate for the SAME sampled year as `ret`/`inflation` —
+  // additive, so a schedule that omits it (any hand-built or pre-0.4.0
+  // rates array) falls back to `ret` for cash-class accounts, unchanged.
+  // Populated by montecarlo.ts's sampleSchedule() so a cash sleeve grows
+  // along a path correlated with the same sampled market years, instead of
+  // riding the sp500 path like every other account class.
+  cash_ret?: number;
 }
 
 export interface RunResult {
@@ -184,7 +191,7 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
   // retirement_year rather than a fixed year — resolved here, under
   // EFFECTIVE assumptions, so the rest of run() never sees the sentinel.
   const incomes = plan.incomes.map((i) => (i.end === RETIREMENT ? { ...i, end: a.retirement_year - 1 } : i));
-  let rateFor: (y: number) => { ret: number; inflation: number };
+  let rateFor: (y: number) => { ret: number; inflation: number; cash_ret?: number };
   if (rates) {
     const byYear = new Map<number, YearRates>();
     for (const r of rates) {
@@ -198,10 +205,13 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
       if (!Number.isFinite(r.ret) || !Number.isFinite(r.inflation)) {
         throw new Error("rates schedule contains non-finite values");
       }
+      if (r.cash_ret != null && !Number.isFinite(r.cash_ret)) {
+        throw new Error("rates schedule contains non-finite values");
+      }
     }
     rateFor = (y: number) => {
       const r = byYear.get(y)!;
-      return { ret: r.ret, inflation: r.inflation };
+      return { ret: r.ret, inflation: r.inflation, cash_ret: r.cash_ret };
     };
   } else {
     rateFor = () => ({ ret: a.ret, inflation: a.inflation });
@@ -267,14 +277,19 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
     // when a `rates` schedule is present, sampled paths are dominant —
     // the schedule's ret wins over both acc.ret and class_returns (MC
     // scenario shocks must not be short-circuited by a per-account/class
-    // override). Only in the no-schedule case does resolveRet()'s account
-    // -> class_returns -> plan-default chain apply. Computed once and
-    // reused by both the cash-tax gate below and the growth loop at the
-    // end of the year, so tax and growth never drift.
+    // override) — EXCEPT cash-class accounts (acc.tax === "cash"), which
+    // follow the schedule's cash_ret (a correlated T-bill path, sampled
+    // from the SAME historical year as ret/inflation) instead of the
+    // sp500-derived ret, falling back to yr.ret when the schedule was
+    // built before cash_ret existed. Only in the no-schedule case does
+    // resolveRet()'s account -> class_returns -> plan-default chain apply.
+    // Computed once and reused by both the cash-tax gate below and the
+    // growth loop at the end of the year, so tax and growth never drift.
     const yr = rateFor(y);
     const growthRate: Record<string, number> = {};
     for (const acc of plan.accounts) {
-      growthRate[acc.name] = acc.growth ?? (rates ? yr.ret : resolveRet(acc, a));
+      const scheduledRate = acc.tax === "cash" ? (yr.cash_ret ?? yr.ret) : yr.ret;
+      growthRate[acc.name] = acc.growth ?? (rates ? scheduledRate : resolveRet(acc, a));
     }
 
     // ---------- income ----------

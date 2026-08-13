@@ -309,7 +309,7 @@ export function createServer(session: Session): McpServer {
     "monte_carlo",
     {
       description:
-        "Run a block-bootstrap Monte Carlo simulation over the base plan or a named scenario; returns success rate and thinned, rounded percentile bands over net worth. Results are NOMINAL dollars — no today's-$ conversion is meaningful per-trial under sampled inflation. Note: ret/inflation scenario overrides are ignored — per-year rates come from sampled market history; retirement_year, savings, social-security, and extra income/expense overrides all apply.",
+        "Run a block-bootstrap Monte Carlo simulation over the base plan or a named scenario; returns success rate and thinned, rounded percentile bands over net worth. Results are NOMINAL dollars — no today's-$ conversion is meaningful per-trial under sampled inflation. Note: ret/inflation scenario overrides are ignored — per-year rates come from sampled market history; retirement_year, savings, social-security, and extra income/expense overrides all apply. Cash-class accounts follow a historical T-bill path correlated with the same sampled years as the equity/inflation path (not the equity path itself) — expect narrower percentile bands for cash-heavy plans.",
       inputSchema: {
         scenario: z.string().optional(),
         trials: z.number().int().min(1).max(10_000).default(1000),
