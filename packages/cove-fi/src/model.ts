@@ -20,7 +20,11 @@ export interface Account {
   penalty_rate?: number;
   rmd?: boolean;
   basis?: number | null; // taxable accounts: starting cost basis
+  ret?: number | null; // per-account nominal return override; see resolveRet()
 }
+
+/** Per-tax-class default nominal return overrides (assumptions.class_returns). */
+export type ClassReturns = Partial<Record<TaxType, number>>;
 
 export interface Income {
   name: string;
@@ -91,6 +95,7 @@ export interface Assumptions {
   retirement_year: number;
   coast_multiple: number; // x spending, 3yr avg LNW
   fi_multiple: number;
+  class_returns?: ClassReturns; // per-tax-class nominal return defaults; see resolveRet()
 }
 
 export const DEFAULT_ASSUMPTIONS: Assumptions = {
@@ -234,4 +239,16 @@ export function normalizePlan(plan: Plan): Plan {
       : (plan.house ?? null),
     drawdown_order: plan.drawdown_order ?? [...DEFAULT_DRAWDOWN_ORDER],
   };
+}
+
+/**
+ * Resolve the nominal return an account grows at, in precedence order:
+ * an explicit per-account override, then the plan's per-tax-class
+ * default, then the plan's global default. Not yet wired into the
+ * growth loop in engine.ts (that lands with the rest of the 0.4.0
+ * per-class-return feature) — this is the standalone resolution
+ * function other code will call.
+ */
+export function resolveRet(acc: Account, a: Assumptions): number {
+  return acc.ret ?? a.class_returns?.[acc.tax] ?? a.ret;
 }

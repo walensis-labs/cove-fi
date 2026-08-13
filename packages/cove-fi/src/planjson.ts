@@ -20,6 +20,13 @@ import { COAST, type Plan, RETIREMENT, type TaxType, normalizePlan } from "./mod
 
 const TAX_TYPES: readonly TaxType[] = ["cash", "taxable", "trad", "roth", "hsa", "529"];
 const LIMIT_KEYS = new Set(["401k", "ira", "hsa_family"]);
+// Nominal-return bound shared by account.ret and assumptions.class_returns
+// values (design doc: "finite, in [-0.5, 0.5], list all offenders").
+const RET_MIN = -0.5;
+const RET_MAX = 0.5;
+function isValidRet(v: unknown): v is number {
+  return isNum(v) && v >= RET_MIN && v <= RET_MAX;
+}
 
 export class PlanValidationError extends Error {
   issues: string[];
@@ -102,6 +109,9 @@ export function planFromJson(data: unknown): Plan {
     if (raw.penalty_rate != null && !isNum(raw.penalty_rate)) issues.push(`${label}.penalty_rate must be a number`);
     if (raw.rmd != null && !isBool(raw.rmd)) issues.push(`${label}.rmd must be a boolean`);
     if (raw.basis != null && !isNum(raw.basis)) issues.push(`${label}.basis must be a number or null`);
+    if (raw.ret != null && !isValidRet(raw.ret)) {
+      issues.push(`${label}.ret must be a number in [${RET_MIN}, ${RET_MAX}] (got ${JSON.stringify(raw.ret)})`);
+    }
   });
 
   // ---------- incomes ----------
@@ -262,6 +272,22 @@ export function planFromJson(data: unknown): Plan {
     for (const k of numericKeys) {
       const v = d.assumptions[k];
       if (v != null && !isNum(v)) issues.push(`assumptions.${k} must be a number`);
+    }
+    const classReturns = d.assumptions.class_returns;
+    if (classReturns != null) {
+      if (!isObj(classReturns)) {
+        issues.push("assumptions.class_returns must be an object");
+      } else {
+        for (const [k, v] of Object.entries(classReturns)) {
+          if (!TAX_TYPES.includes(k as TaxType)) {
+            issues.push(`assumptions.class_returns has unknown tax class "${k}" (must be one of ${TAX_TYPES.join(", ")})`);
+          } else if (!isValidRet(v)) {
+            issues.push(
+              `assumptions.class_returns.${k} must be a number in [${RET_MIN}, ${RET_MAX}] (got ${JSON.stringify(v)})`,
+            );
+          }
+        }
+      }
     }
   }
 
