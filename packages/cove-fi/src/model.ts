@@ -28,6 +28,13 @@ export interface Account {
   // income taxation of the resolved growth rate (see cashTaxGated() in
   // engine.ts). Ignored for growth whenever `growth` above is set.
   ret?: number | null;
+  // 0.5.0: earmarked for a specific goal (e.g. a house fund) rather than
+  // general-purpose net worth. normalizePlan defaults this false and, when
+  // true, forces `liquid` to false regardless of what `liquid` says (see
+  // normalizePlan below); planjson separately rejects an EXPLICIT
+  // liquid:true paired with earmarked:true. The engine does not read this
+  // field yet (0.5.0 Task 3).
+  earmarked?: boolean;
 }
 
 /** Per-tax-class default nominal return overrides (assumptions.class_returns). */
@@ -87,6 +94,17 @@ export interface Contribution {
   employer_match_pct?: number | null; // % of salary
   employer_match_flat?: number | null; // today's $/yr
   pretax?: boolean; // reduces taxable income
+  // 0.5.0: optional label for this rung. When present, planjson requires a
+  // non-empty string, unique among every OTHER named rung (unnamed rungs
+  // never collide). Not defaulted by normalizePlan — absent stays absent.
+  // The engine does not read this field yet (0.5.0 Task 3).
+  name?: string;
+  // 0.5.0: a plain calendar year that hard-caps this rung, independent of
+  // `end`. Must be a finite integer year — the COAST (-1) and RETIREMENT
+  // (-2) sentinels are explicitly rejected here (they're meaningful on
+  // `start`/`end`, not on a "hard" cutoff). Not defaulted by normalizePlan.
+  // The engine does not read this field yet (0.5.0 Task 3).
+  hard_end?: number;
 }
 
 export interface Assumptions {
@@ -199,15 +217,21 @@ export function normalizePlan(plan: Plan): Plan {
   return {
     ...plan,
     assumptions: { ...DEFAULT_ASSUMPTIONS, ...plan.assumptions },
-    accounts: plan.accounts.map((acc) => ({
-      ...acc,
-      growth: acc.growth ?? null,
-      liquid: acc.liquid ?? true,
-      penalty_age: acc.penalty_age ?? 60,
-      penalty_rate: acc.penalty_rate ?? 0.1,
-      rmd: acc.rmd ?? false,
-      basis: acc.basis ?? null,
-    })),
+    accounts: plan.accounts.map((acc) => {
+      const earmarked = acc.earmarked ?? false;
+      return {
+        ...acc,
+        growth: acc.growth ?? null,
+        // earmarked forces liquid false regardless of what `liquid` says;
+        // otherwise fall through to the pre-0.5.0 default (true).
+        liquid: earmarked ? false : (acc.liquid ?? true),
+        penalty_age: acc.penalty_age ?? 60,
+        penalty_rate: acc.penalty_rate ?? 0.1,
+        rmd: acc.rmd ?? false,
+        basis: acc.basis ?? null,
+        earmarked,
+      };
+    }),
     incomes: plan.incomes.map((i) => ({
       ...i,
       taxable: i.taxable ?? true,
