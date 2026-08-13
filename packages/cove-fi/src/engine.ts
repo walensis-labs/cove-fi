@@ -55,7 +55,107 @@ export interface YearRates {
   inflation: number;
 }
 
+export interface RunResult {
+  rows: YearRow[];
+  coast_year: number | null;
+}
+
+/**
+ * Pure amortization replay — mirrors the engine's monthly mortgage loop
+ * exactly (12 payments/yr; the plan's own first_year_fraction truncates the
+ * first year's payment count via Math.trunc(12 * frac)). Returns the
+ * balance remaining after `uptoYear`'s payments and the interest+principal
+ * paid during `uptoYear` specifically (0 for both once the loan is
+ * retired). `uptoYear < startYear` returns the loan untouched.
+ */
+function replayMortgage(
+  house: Plan["house"],
+  startYear: number,
+  firstYearFraction: number,
+  uptoYear: number,
+): { balance: number; paidInYear: number } {
+  if (!house?.mortgage) return { balance: 0, paidInYear: 0 };
+  let bal = house.mortgage.balance;
+  let paidInYear = 0;
+  for (let y = startYear; y <= uptoYear; y++) {
+    const frac = y === startYear ? firstYearFraction : 1.0;
+    paidInYear = 0;
+    if (bal > 0) {
+      const nMonths = Math.trunc(12 * frac);
+      for (let m = 0; m < nMonths; m++) {
+        const interest = (bal * house.mortgage.rate) / 12;
+        const principal = Math.min(house.mortgage.payment_monthly - interest, bal);
+        bal -= principal;
+        paidInYear += interest + principal;
+      }
+    }
+  }
+  return { balance: bal, paidInYear };
+}
+
+/**
+ * Pure amortization replay of the plan's mortgage (if any) through `year`,
+ * mirroring the engine's monthly loop exactly — no dependency on a run()
+ * call. Used both by `coastTargetAtRetirement` (that year's P&I) and by
+ * the in-loop coast test (netting the projected remaining balance at
+ * retirement_year out of projected liquid balances).
+ */
+export function mortgageBalanceAt(plan: Plan, year: number): number {
+  const p = normalizePlan(plan);
+  return replayMortgage(p.house, p.assumptions.start_year, p.assumptions.first_year_fraction, year).balance;
+}
+
+/**
+ * True-CoastFIRE target: fi_multiple x the household's annual spending in
+ * retirement_year (R = a.retirement_year), computed from CONSTANT rates
+ * (a.inflation, house appreciation) via closed-form powers — this is an
+ * EXPECTATIONS test, so it never reads the trial's sampled rates path even
+ * when one is active elsewhere in the same run.
+ *
+ * Mirrors engine's own expense/house-cost formulas exactly:
+ *   - explicit expenses active at R, grown per their convention: today's-$
+ *     items by (1+inflation+growth_over_inflation)^(R-start_year);
+ *     nominal_at_start items by the SAME rate ^(R-e.start) — this single
+ *     exponent form is correct whether e.start falls before OR after
+ *     start_year (the engine's running expGrow multiplier seeds pre-horizon
+ *     items at g^(start_year-e.start-1) and then multiplies every year
+ *     start_year..R inclusive since e.start < start_year <= every such
+ *     year, which telescopes to exactly g^(R-e.start)).
+ *   - fund_from (529-funded) expenses excluded — not household cash flow.
+ *   - house costs at R: property/insurance/maintenance on appreciated
+ *     value, HOA inflated, and that year's mortgage P&I (0 once the loan
+ *     is retired by R) — all frac-adjusted only when R === start_year,
+ *     exactly like the engine's per-year `frac`.
+ */
+export function coastTargetAtRetirement(plan: Plan, a: Assumptions): number {
+  const p = normalizePlan(plan);
+  const R = a.retirement_year;
+  const frac = R === a.start_year ? a.first_year_fraction : 1.0;
+  let spend = 0.0;
+  for (const e of p.expenses) {
+    if (e.fund_from) continue;
+    if (e.start <= R && R <= e.end) {
+      const g = 1 + a.inflation + (e.growth_over_inflation ?? 0);
+      const exponent = e.nominal_at_start ? R - e.start : R - a.start_year;
+      spend += e.amount * g ** exponent * frac;
+    }
+  }
+  const h = p.house;
+  if (h) {
+    const hv = h.value * (1 + h.appreciation) ** (R - a.start_year);
+    spend += hv * ((h.property_tax_rate ?? 0) + (h.insurance_rate ?? 0) + (h.maintenance_rate ?? 0)) * frac;
+    const infFactor = (1 + a.inflation) ** (R - a.start_year);
+    spend += (h.hoa_monthly ?? 0) * 12 * infFactor * frac;
+    spend += replayMortgage(h, a.start_year, a.first_year_fraction, R).paidInYear;
+  }
+  return a.fi_multiple * spend;
+}
+
 export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRates[]): YearRow[] {
+  return runWithMeta(plan, overrides, rates).rows;
+}
+
+export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRates[]): RunResult {
   plan = normalizePlan(plan);
   let a: Assumptions = plan.assumptions;
   if (overrides) {
@@ -99,8 +199,18 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
   }
   let mortBal = plan.house?.mortgage ? plan.house.mortgage.balance : 0.0;
   let coastYear: number | null = null;
-  const spendHist: number[] = [];
   const rows: YearRow[] = [];
+  // Coast expectations test — target, netted mortgage balance, and the
+  // per-account rate used to project balances forward are ALL y-invariant
+  // (R is fixed, and the projection deliberately ignores any rates
+  // schedule), so every one of them is computed once here rather than
+  // inside the year loop.
+  const coastTarget = coastTargetAtRetirement(plan, a);
+  const coastMortgageBalanceAtR = mortgageBalanceAt(plan, a.retirement_year);
+  const coastGrowthRate: Record<string, number> = {};
+  for (const acc of plan.accounts) {
+    coastGrowthRate[acc.name] = acc.growth ?? resolveRet(acc, a);
+  }
   const lastWorkYear = a.retirement_year - 1;
   let f = 1.0;
   const expGrow = plan.expenses.map((e) =>
@@ -390,13 +500,23 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
     row.net_worth = liquid + il529 + hv2 - mortBal;
     rows.push(row);
 
-    spendHist.push(row.expenses);
-    const tail = spendHist.slice(-3);
-    const avg = tail.reduce((s, v) => s + v, 0) / Math.min(spendHist.length, 3);
-    if (coastYear === null && row.liquid_net_worth >= a.coast_multiple * avg) {
-      coastYear = y;
+    // True-CoastFIRE expectations test (replaces the old trailing-spend x
+    // coast_multiple heuristic): deterministic rates always, even under an
+    // active rates schedule (coastGrowthRate/coastTarget/coastMortgage
+    // BalanceAtR are all precomputed from constant rates above). Only
+    // while still working — once y reaches retirement_year the household
+    // is either already retired or the notion of "coasting to R" is moot.
+    if (coastYear === null && y < a.retirement_year) {
+      let projected = 0.0;
+      for (const acc of plan.accounts) {
+        if (!acc.liquid) continue;
+        projected += bal[acc.name]! * (1 + coastGrowthRate[acc.name]!) ** (a.retirement_year - y);
+      }
+      if (projected - coastMortgageBalanceAtR >= coastTarget) {
+        coastYear = y;
+      }
     }
   }
 
-  return rows;
+  return { rows, coast_year: coastYear };
 }

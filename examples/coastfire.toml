@@ -1,13 +1,21 @@
 # Cove FI example: "coastfire"
 #
 # Demonstrates the COAST sentinel: contribution rungs whose `start` or `end`
-# is -1 mean "no fixed date — tied to the coast-fi trigger" instead. Coast
-# triggers the first year liquid net worth reaches `assumptions.coast_multiple`
-# (default 4x) trailing 3-year-average expenses — this household saves so
-# aggressively that it happens almost immediately (within a couple of
-# years). From that point, heavy contributions stop and the portfolio is
-# left to compound on its own (plus one small ongoing rung) all the way to
-# full FI (25x expenses), which arrives right around retirement.
+# is -1 mean "no fixed date — tied to the coast-fi trigger" instead. As of
+# 0.4.0, coast is the TRUE CoastFIRE expectations test: the first year each
+# liquid account's current balance, grown at its own resolved rate to
+# retirement_year, nets (after subtracting any mortgage still owed at
+# retirement) to at least fi_multiple x retirement-year spending — i.e. the
+# first year this household could stop contributing today and still reach
+# full FI purely on growth by 2060. (`assumptions.coast_multiple` is 0.4-
+# deprecated and read nowhere anymore.) This household saves aggressively
+# enough that it triggers just 5 years in (2031), not instantly — the true
+# test has to clear a much higher bar than the old trailing-spend heuristic
+# did, since it's compounding against retirement-year spending three-plus
+# decades out, not today's. From that point, heavy contributions stop and
+# the portfolio is left to compound on its own (plus one small ongoing
+# rung) all the way to full FI (25x expenses), which arrives right around
+# retirement.
 #
 # Household: born 1992, working 2026-2059, retiring in 2060 at age 68.
 # Contributions 1 and 3 below run `start = 2026, end = -1` — heavy, and
@@ -20,13 +28,17 @@
 #   - assumptions.retirement_year: this is the main lever on whether the
 #     post-coast decades of compounding actually catch up to 25x expenses
 #     by the end of the plan — push it earlier and fi_year can go null.
+#     It also moves coast_year itself now: a nearer retirement_year shrinks
+#     both sides of the true-CoastFIRE test (less time to grow into a
+#     smaller compounded target), not just the "coast to what" side.
 #   - contributions[2].pct_of_income (brokerage, the heavy pre-coast rung):
 #     raise or lower it and coast_year moves — but notice how little that
 #     ultimately changes the outcome; decades of post-coast compounding
 #     dominate the terminal number either way.
-#   - assumptions.coast_multiple: raise it (e.g. to 6) and coast_year moves
-#     later, since it now takes a bigger liquid-net-worth cushion relative
-#     to spending to trigger.
+#   - assumptions.ret: the true-CoastFIRE test projects EVERY liquid
+#     account forward at its own resolved rate, so a higher assumed return
+#     both grows the balance faster pre-coast and compounds it harder to
+#     retirement_year — coast_year moves earlier fast.
 
 [plan]
 birth_year = 1992

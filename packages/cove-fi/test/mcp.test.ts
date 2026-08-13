@@ -46,6 +46,11 @@ describe("mcp server", () => {
     expect(proj.rows.length).toBeLessThanOrEqual(30);
     const fi = await call("fi_status");
     expect(fi).toHaveProperty("retirement_year");
+    // 0.4.0: additive field alongside coast_year — nominal $, rounded like
+    // the other terminal-net-worth dollar figures on this payload.
+    expect(typeof fi.coast_target_at_retirement).toBe("number");
+    expect(Number.isFinite(fi.coast_target_at_retirement)).toBe(true);
+    expect(fi.coast_target_at_retirement).toBe(Math.round(fi.coast_target_at_retirement));
   });
   it("scenario define + compare", async () => {
     await call("load_plan", { path: planPath });

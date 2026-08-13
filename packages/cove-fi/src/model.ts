@@ -100,7 +100,7 @@ export interface Assumptions {
   end_year: number;
   first_year_fraction: number; // partial first year (start mid-year)
   retirement_year: number;
-  coast_multiple: number; // x spending, 3yr avg LNW
+  coast_multiple: number; // deprecated 0.4: coast is now the true CoastFIRE test; this knob is ignored
   fi_multiple: number;
   class_returns?: ClassReturns; // per-tax-class nominal return defaults; see resolveRet()
 }

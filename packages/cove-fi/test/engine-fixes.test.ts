@@ -68,7 +68,7 @@ describe("RETIREMENT sentinel + coast_multiple", () => {
   });
 });
 
-describe("coast_multiple", () => {
+describe("coast_multiple (0.4: deprecated — coast is now the true CoastFIRE expectations test)", () => {
   const coastYearAt = (cm: number) => {
     const p = { ...syntheticPlan(), assumptions: { ...syntheticPlan().assumptions, coast_multiple: cm } };
     const path = join(mkdtempSync(join(tmpdir(), "covefi-")), "p.toml");
@@ -77,12 +77,17 @@ describe("coast_multiple", () => {
     s.loadPlanFile(path);
     return s.fiStatus().coast_year;
   };
-  it("lower multiple coasts no later than higher", () => {
+  it("the knob no longer has any effect on coast_year — same plan, wildly different multiples, identical result", () => {
+    // Pre-0.4 this asserted "lower multiple coasts no later than higher" —
+    // now coast_multiple is read nowhere in the engine (see coast.test.ts's
+    // dedicated "coast_multiple ignored" pin for the true-CoastFIRE
+    // equivalent using a plan that actually coasts); syntheticPlan() never
+    // reaches its true-CoastFIRE target within the horizon, so all three
+    // are null here, which is itself the invariance being tested.
     const c3 = coastYearAt(3);
     const c6 = coastYearAt(6);
-    expect(c3).not.toBeNull();
-    expect(c6).not.toBeNull();
-    expect(c3!).toBeLessThanOrEqual(c6!);
-    expect(c3).not.toBe(coastYearAt(400) ?? -1); // absurd multiple never coasts (null) — proves the knob is live
+    const c400 = coastYearAt(400);
+    expect(c3).toBe(c6);
+    expect(c6).toBe(c400);
   });
 });

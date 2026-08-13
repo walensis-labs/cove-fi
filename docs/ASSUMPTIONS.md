@@ -20,7 +20,7 @@ implementation).
 | `income_tax` | 0.30 | flat effective rate | flat effective placeholder - FlatTax seam, see docs/SEMANTICS.md (tax model) |
 | `local_tax` | 0.01 | flat effective rate | flat effective placeholder - FlatTax seam, see docs/SEMANTICS.md (tax model) |
 | `cap_gains_tax` | 0.15 | flat effective rate | US LTCG middle bracket |
-| `coast_multiple` | 4.0 | x trailing spend | 4% rule, Trinity study; coast = 4x trailing spend heuristic |
+| `coast_multiple` | 4.0 | x trailing spend | deprecated 0.4: ignored — coast is now the true CoastFIRE expectations test (see fi_multiple, retirement_year) |
 | `fi_multiple` | 25.0 | x annual spend | 4% rule, Trinity study (1/0.04 = 25) |
 
 Not cited above (household-specific, no universal default to justify):

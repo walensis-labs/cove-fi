@@ -74,6 +74,7 @@ function roundFiStatus(fi: FiStatus): FiStatus {
     ...fi,
     terminal_net_worth: Math.round(fi.terminal_net_worth),
     terminal_net_worth_todays: Math.round(fi.terminal_net_worth_todays),
+    coast_target_at_retirement: Math.round(fi.coast_target_at_retirement),
   };
 }
 

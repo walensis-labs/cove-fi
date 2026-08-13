@@ -134,10 +134,20 @@ expenses are, like any other surplus, spent rather than reinvested.
 
 - **`COAST` (`-1`).** Valid on a `Contribution`'s `start` or `end`. `end:
   -1` means "run until the plan's coast-fi trigger fires, then stop";
-  `start: -1` means "dormant until coast triggers, then start." Coast
-  triggers the first year `liquid_net_worth >= coast_multiple * (3-year
-  trailing average expenses)` — once triggered, it's a one-time
-  irreversible switch for the rest of the run.
+  `start: -1` means "dormant until coast triggers, then start." As of
+  0.4.0, coast is the true CoastFIRE expectations test (`coast_multiple`
+  is deprecated and read nowhere): the first working year (`y <
+  retirement_year`) where every liquid account's CURRENT balance, grown at
+  its own resolved rate (`acc.growth ?? resolveRet(acc, a)`, always
+  deterministic — a rates schedule is never consulted here even when one
+  drives the rest of the run) to `retirement_year`, minus the mortgage
+  balance still projected to be owed at `retirement_year`
+  (`mortgageBalanceAt`), is at least `fi_multiple x` that year's projected
+  retirement spending (`coastTargetAtRetirement` — explicit expenses plus
+  house costs, both grown to `retirement_year` from constant rates). Once
+  triggered, it's a one-time irreversible switch for the rest of the run.
+  See `engine.ts`'s `coastTargetAtRetirement` / `mortgageBalanceAt` doc
+  comments for the exact closed-form formulas.
 - **`RETIREMENT` (`-2`).** Valid only on `Income.end`. Means "track this
   scenario's `retirement_year`" instead of a fixed year — resolved once,
   under *effective* assumptions (i.e. after any scenario override merges),

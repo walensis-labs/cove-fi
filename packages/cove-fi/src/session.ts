@@ -26,7 +26,7 @@
  * `retirement_year` override here moves that income's end date too.
  */
 import { readFileSync } from "node:fs";
-import { run, type YearRow } from "./engine.js";
+import { coastTargetAtRetirement, run, runWithMeta, type YearRow } from "./engine.js";
 import { type Assumptions, type Expense, type Income, IRS_LIMITS_2026, type Plan } from "./model.js";
 import { runMonteCarlo, type MonteCarloResult } from "./montecarlo.js";
 import { loadPlan } from "./planfile.js";
@@ -47,6 +47,7 @@ export interface ScenarioOverrides {
 export interface FiStatus {
   fi_year: number | null;
   coast_year: number | null;
+  coast_target_at_retirement: number; // nominal $; fi_multiple x retirement-year spending (engine.coastTargetAtRetirement)
   depletion_year: number | null;
   terminal_net_worth: number;
   terminal_net_worth_todays: number;
@@ -141,20 +142,6 @@ function toTodaysDollars(rows: YearRow[], a: Assumptions): YearRow[] {
   });
 }
 
-/** Same rule as the engine's internal coast-year trigger (assumptions.coast_multiple x trailing 3-year average expenses), recomputed from finished rows. */
-function computeCoastYear(rows: YearRow[], coastMultiple: number): number | null {
-  const spendHist: number[] = [];
-  for (const r of rows) {
-    spendHist.push(r.expenses);
-    const tail = spendHist.slice(-3);
-    const avg = tail.reduce((s, v) => s + v, 0) / Math.min(spendHist.length, 3);
-    if (r.liquid_net_worth >= coastMultiple * avg) {
-      return r.year;
-    }
-  }
-  return null;
-}
-
 function computeFiYear(rows: YearRow[], fiMultiple: number): number | null {
   for (const r of rows) {
     if (r.liquid_net_worth >= fiMultiple * r.expenses) return r.year;
@@ -169,12 +156,13 @@ function computeDepletionYear(rows: YearRow[], retirementYear: number): number |
   return null;
 }
 
-function computeFiStatus(rows: YearRow[], a: Assumptions): FiStatus {
+function computeFiStatus(rows: YearRow[], a: Assumptions, coastYear: number | null, plan: Plan): FiStatus {
   const last = rows.at(-1)!;
   const factor = (1 + a.inflation) ** (last.year - a.start_year);
   return {
     fi_year: computeFiYear(rows, a.fi_multiple),
-    coast_year: computeCoastYear(rows, a.coast_multiple),
+    coast_year: coastYear,
+    coast_target_at_retirement: coastTargetAtRetirement(plan, a),
     depletion_year: computeDepletionYear(rows, a.retirement_year),
     terminal_net_worth: last.net_worth,
     terminal_net_worth_todays: last.net_worth / factor,
@@ -268,8 +256,8 @@ export class Session {
   }
 
   fiStatus(scenario?: string): FiStatus {
-    const { rows, assumptions } = this.runScenario(scenario);
-    return computeFiStatus(rows, assumptions);
+    const { rows, assumptions, coastYear, plan } = this.runScenario(scenario);
+    return computeFiStatus(rows, assumptions, coastYear, plan);
   }
 
   /** Resolves the named overlay exactly like runProjection (applyOverrides),
@@ -296,9 +284,9 @@ export class Session {
     const series: Record<string, YearRow[]> = {};
     const statuses: Record<string, FiStatus> = {};
     for (const name of names) {
-      const { rows, assumptions } = this.runScenario(name);
+      const { rows, assumptions, coastYear, plan } = this.runScenario(name);
       series[name] = rows;
-      statuses[name] = computeFiStatus(rows, assumptions);
+      statuses[name] = computeFiStatus(rows, assumptions, coastYear, plan);
     }
     const baseName = names[0]!;
     const baseStatus = statuses[baseName]!;
@@ -345,10 +333,13 @@ export class Session {
     return o;
   }
 
-  private runScenario(scenario?: string): { rows: YearRow[]; assumptions: Assumptions } {
+  private runScenario(
+    scenario?: string,
+  ): { rows: YearRow[]; assumptions: Assumptions; coastYear: number | null; plan: Plan } {
     const plan = this.requirePlan();
     const overlay = this.resolveOverlay(scenario);
     const modified = applyOverrides(plan, overlay);
-    return { rows: run(modified), assumptions: modified.assumptions };
+    const { rows, coast_year } = runWithMeta(modified);
+    return { rows, assumptions: modified.assumptions, coastYear: coast_year, plan: modified };
   }
 }
