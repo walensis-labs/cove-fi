@@ -235,9 +235,14 @@ rungs).
 - **`coastGrowthRate[acc]`** is `acc.growth ?? resolveRet(acc, a)` (Return
   model above, steps 1/3/4/5) — always deterministic, computed once per
   account before the year loop, and NEVER reads an active `rates`
-  schedule even when one is driving the rest of the run: a Monte Carlo
-  trial's coast trigger reflects the plan's own expected returns, not
-  that trial's sampled path.
+  schedule even when one is driving the rest of the run: the coast
+  projection RATE reflects the plan's own expected returns, not that
+  trial's sampled path. The CURRENT balance the test projects forward
+  from, though, IS the plan's realized balance at year `y` — under an
+  active rates schedule that balance is trial-dependent (it's whatever
+  that trial's sampled path has produced by year `y`), so `coast_year`
+  itself can still vary across Monte Carlo trials even though the
+  forward-projection rate and the target never do.
 - **`mortgageBalanceAt(retirement_year)`** is a pure amortization replay
   of the plan's mortgage (if any) from `start_year` through
   `retirement_year` at the mortgage's own fixed rate — netted out of the

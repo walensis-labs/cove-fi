@@ -130,7 +130,8 @@ invariants, IRS-table pins, and a Monte Carlo benchmark against the
 Trinity-study withdrawal-rate literature. See
 [`docs/VALIDATION.md`](../../docs/VALIDATION.md) for the full methodology,
 citations, and an honest accounting of current limitations (flat effective
-tax model, single-asset Monte Carlo, no state tax/IRMAA). For the engine's
+tax model, equity + correlated T-bill Monte Carlo with portfolio mixes
+planned, no state tax/IRMAA). For the engine's
 actual rules — the contribution waterfall, drawdown order, sentinels — see
 [`docs/SEMANTICS.md`](../../docs/SEMANTICS.md).
 
