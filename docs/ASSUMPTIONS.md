@@ -22,6 +22,7 @@ implementation).
 | `cap_gains_tax` | 0.15 | flat effective rate | US LTCG middle bracket |
 | `coast_multiple` | 4.0 | x trailing spend | deprecated 0.4: ignored — coast is now the true CoastFIRE expectations test (see fi_multiple, retirement_year) |
 | `fi_multiple` | 25.0 | x annual spend | 4% rule, Trinity study (1/0.04 = 25) |
+| `class_returns.cash` | *(none — opt-in)* | annual nominal rate | HYSA/T-bill nominal yield assumption; falls back to `ret` when unset. New 0.4: setting it (or an account's own `ret`) also gates ordinary-income taxation of that cash account's growth — see docs/SEMANTICS.md (Return model) |
 
 Not cited above (household-specific, no universal default to justify):
 `start_year`, `end_year`, `first_year_fraction`, `retirement_year`.

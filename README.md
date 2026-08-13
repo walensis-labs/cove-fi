@@ -64,6 +64,17 @@ benchmark against the Trinity-study withdrawal-rate literature. See
 [`docs/VALIDATION.md`](./docs/VALIDATION.md) for the full methodology,
 citations, and an honest accounting of current limitations.
 
+As of 0.4, accounts can carry their own nominal return or default by tax
+class instead of a single global rate, and opting a cash account into
+either taxes its growth as ordinary income each year, like real interest.
+Monte Carlo gives cash sleeves the same honest treatment: they follow a
+historical T-bill path correlated with the same sampled market years
+instead of riding the equity path like every other account, so cash-heavy
+plans get narrower percentile bands. `coast_year` is now a true CoastFIRE
+expectations test — does each account's current balance, grown at its own
+rate to `retirement_year`, already clear `fi_multiple x` projected
+retirement spending — rather than a trailing-spend heuristic.
+
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)

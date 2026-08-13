@@ -134,6 +134,19 @@ tax model, single-asset Monte Carlo, no state tax/IRMAA). For the engine's
 actual rules — the contribution waterfall, drawdown order, sentinels — see
 [`docs/SEMANTICS.md`](../../docs/SEMANTICS.md).
 
+As of 0.4, per-account (`ret`) and per-tax-class (`assumptions.class_returns`)
+return overrides sit alongside the global `ret` default — and opting a
+cash account into either taxes its growth as ordinary income every year,
+rather than letting it compound tax-free. `monte_carlo` treats cash the
+same way: cash-class accounts follow a historical T-bill path correlated
+with the same sampled market years instead of the equity path everything
+else rides, so a cash-heavy plan shows visibly narrower percentile bands.
+And `coast_year` is now a true CoastFIRE expectations test — projecting
+each account's current balance forward at its own resolved rate to
+`retirement_year` and comparing against `fi_multiple x` projected
+retirement spending — instead of the old trailing-spend x `coast_multiple`
+heuristic, which is deprecated and ignored.
+
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)

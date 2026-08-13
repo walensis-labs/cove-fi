@@ -101,6 +101,83 @@ taxed there; only Social Security's `taxable_fraction` and drawdown
 withdrawals are taxed post-retirement (see Retirement drawdown order
 above).
 
+## Return model
+
+Every account's nominal growth rate for a given year resolves through a
+fixed precedence chain, evaluated fresh each year (`growthRate` in
+`engine.ts`):
+
+1. **`Account.growth`** (legacy). If set — including `0` — it wins
+   outright, for every account, every year, no exceptions. Nothing below
+   is even consulted. This is the pre-0.4.0 knob and keeps absolute
+   precedence for backward compatibility.
+2. **A `rates` schedule, if one is active** (Monte Carlo, or a hand-built
+   schedule passed to `run()`/`runWithMeta()` directly). Sampled market
+   paths dominate over any per-account or per-class override — an
+   account opted into `ret` or `class_returns` does not get to zero out
+   its own trial variance. Non-cash-class accounts follow the schedule's
+   `ret` (equity path); cash-class accounts (`tax === "cash"`) follow the
+   schedule's `cash_ret` (a T-bill path — see Monte Carlo return
+   partitioning below), falling back to `ret` when the schedule predates
+   `cash_ret` (any hand-built or pre-0.4.0 schedule).
+3. **`Account.ret`** (new-style override). Participates only when no
+   schedule is active. Wins over the class/global default.
+4. **`Assumptions.class_returns[acc.tax]`** (per-tax-class default). Wins
+   over the global default when set and no account-level `ret` is set.
+5. **`Assumptions.ret`** (global default). The fallback of last resort.
+
+`resolveRet(acc, a)` (`model.ts`) implements steps 3-5 only (account ->
+class -> global); `engine.ts`'s per-year `growthRate` wraps it with steps
+1-2 (`growth`, then schedule dominance) on top. The **coast expectations
+test** (see FI and Coast definitions below) always uses `acc.growth ??
+resolveRet(acc, a)` directly — steps 1, 3, 4, 5 only, deliberately
+skipping step 2 even when a schedule is driving the rest of the run,
+because the coast projection is a plan-level expectation, not a sampled
+trial outcome.
+
+### Cash-interest taxation (gated)
+
+A cash-class account's resolved growth rate is taxed as ordinary income —
+every year, working or retired — only when the household has explicitly
+opted into the new return model for that account:
+
+```
+cashTaxGated(acc, a) = acc.tax === "cash"
+  && (acc.ret != null || a.class_returns?.cash != null)
+```
+
+An untouched or `growth`-only cash account stays untaxed, exactly
+matching 0.3.0 behavior — this is a strictly additive, opt-in change.
+When gated, the tax added each year is:
+
+```
+taxes += bal[acc] * growthRate[acc] * frac * (income_tax + local_tax)
+```
+
+computed on that account's balance **before** that year's retirement
+drawdown withdrawals reduce it, using the same resolved rate the growth
+step applies at year-end. This is a documented approximation, not a bug:
+it mirrors the engine's existing dividend-tax computation (also levied on
+the pre-drawdown taxable balance), and can modestly overtax a cash
+account in a year it's also being drawn down toward depletion, since the
+balance the tax is computed on is higher than the balance that actually
+earns interest for the full year. No iterative correction is applied.
+
+### Monte Carlo return partitioning
+
+Under Monte Carlo (`runMonteCarlo`), each sampled historical year supplies
+BOTH an equity return (`ret`, the vendored S&P 500 series) and a T-bill
+return (`cash_ret`, the vendored 3-month T-bill series, Damodaran) drawn
+from the SAME sampled index — so a trial's cash sleeve stays historically
+correlated with that trial's equity/inflation path instead of being
+sampled independently. Cash-class accounts follow `cash_ret`; every other
+account class follows `ret`. Because T-bill returns are far less volatile
+than equities, expect materially narrower p10-p90 percentile bands for
+cash-heavy plans than for equity-heavy ones at the same starting balance.
+`ret`/`inflation`/`class_returns` scenario overrides are ignored entirely
+under Monte Carlo (see Monte Carlo below); `acc.ret`/`class_returns` are
+likewise ignored per the schedule-dominance rule above.
+
 ## Retirement drawdown order
 
 Once a year is past `retirement_year - 1` (the last working year), the
@@ -130,24 +207,79 @@ count against this requirement; only the shortfall (`rmd - already
 taken`) is forced. Forced RMD amounts beyond what's needed to cover
 expenses are, like any other surplus, spent rather than reinvested.
 
+## FI and Coast definitions
+
+**FI year** (`fi_status`'s `fi_year`, `FiStatus` in `session.ts`): the
+first projected year where that year's `liquid_net_worth >= fi_multiple x
+that year's expenses` — a trailing-spend Trinity-study/4%-rule test
+against the plan's actual projected path. `fi_multiple` defaults to 25
+(1/0.04). Unaffected by the 0.4.0 coast change below.
+
+**Coast year** (`coast_year`, on both `RunResult` and `FiStatus`), as of
+0.4.0, is the true-CoastFIRE **expectations test** — not a trailing-spend
+comparison. It asks, in each working year `y < retirement_year`: if every
+liquid account grew from its CURRENT balance at its own resolved rate,
+untouched, with no further contributions, would it be enough by
+`retirement_year`? Concretely, the first `y` where
+
+```
+sum over liquid accounts of ( bal[acc] * (1 + coastGrowthRate[acc]) ** (retirement_year - y) )
+  - mortgageBalanceAt(retirement_year)
+  >= coastTargetAtRetirement
+```
+
+triggers coast — a one-time, irreversible switch for the rest of the run
+(see the `COAST` sentinel below for what that switch does to contribution
+rungs).
+
+- **`coastGrowthRate[acc]`** is `acc.growth ?? resolveRet(acc, a)` (Return
+  model above, steps 1/3/4/5) — always deterministic, computed once per
+  account before the year loop, and NEVER reads an active `rates`
+  schedule even when one is driving the rest of the run: a Monte Carlo
+  trial's coast trigger reflects the plan's own expected returns, not
+  that trial's sampled path.
+- **`mortgageBalanceAt(retirement_year)`** is a pure amortization replay
+  of the plan's mortgage (if any) from `start_year` through
+  `retirement_year` at the mortgage's own fixed rate — netted out of the
+  projected liquid balances because a mortgage balance still owed at
+  retirement is a real claim against them.
+- **`coastTargetAtRetirement`** (`engine.ts`) is `fi_multiple x` that
+  year's projected retirement spending: every explicit expense active at
+  `retirement_year`, grown by its own convention (today's-$ items by
+  `(1 + inflation + growth_over_inflation) ** (retirement_year -
+  start_year)`; `nominal_at_start` items by the same rate to the
+  `retirement_year - e.start` power), plus house costs at
+  `retirement_year` (appreciated property tax/insurance/maintenance, HOA,
+  and that year's mortgage P&I) — all computed from CONSTANT rates
+  (`a.inflation`, house appreciation), never a sampled schedule, since
+  this is an expectation, not a trial outcome.
+- **`fund_from` exclusion limitation.** Expenses with `fund_from` set
+  (529-funded) are excluded from the target entirely, mirroring the
+  engine's own per-year `exp` whenever the 529 fully covers them. This
+  closed form has no way to know in advance whether the 529 will still
+  have funds at `retirement_year` — if it would instead be DEPLETED
+  before then, the engine's real per-year loop pushes the shortfall into
+  household cash flow (`exp`), but the target calculation still excludes
+  the full `fund_from` amount regardless. This UNDERSTATES the coast
+  target for a plan whose 529 runs dry before retirement — a documented,
+  not fixed, limitation (see `test/coast.test.ts`'s "fund_from" block).
+- **`coast_multiple` is deprecated and ignored** as of 0.4.0 — it is read
+  nowhere in the engine. The old rule ("current liquid balance >=
+  coast_multiple x trailing spend") is gone; only `fi_multiple` and
+  `retirement_year` drive coast now. Plans that still set `coast_multiple`
+  keep validating (the field is still accepted, for backward-compatible
+  plan files) but the value has no effect.
+
 ## Sentinels
 
 - **`COAST` (`-1`).** Valid on a `Contribution`'s `start` or `end`. `end:
   -1` means "run until the plan's coast-fi trigger fires, then stop";
-  `start: -1` means "dormant until coast triggers, then start." As of
-  0.4.0, coast is the true CoastFIRE expectations test (`coast_multiple`
-  is deprecated and read nowhere): the first working year (`y <
-  retirement_year`) where every liquid account's CURRENT balance, grown at
-  its own resolved rate (`acc.growth ?? resolveRet(acc, a)`, always
-  deterministic — a rates schedule is never consulted here even when one
-  drives the rest of the run) to `retirement_year`, minus the mortgage
-  balance still projected to be owed at `retirement_year`
-  (`mortgageBalanceAt`), is at least `fi_multiple x` that year's projected
-  retirement spending (`coastTargetAtRetirement` — explicit expenses plus
-  house costs, both grown to `retirement_year` from constant rates). Once
-  triggered, it's a one-time irreversible switch for the rest of the run.
-  See `engine.ts`'s `coastTargetAtRetirement` / `mortgageBalanceAt` doc
-  comments for the exact closed-form formulas.
+  `start: -1` means "dormant until coast triggers, then start." See FI
+  and Coast definitions above for exactly what triggers coast as of
+  0.4.0 and how `coast_year` is computed; this sentinel only governs a
+  contribution rung's own start/end relative to that trigger. Once
+  triggered, coast is a one-time irreversible switch for the rest of the
+  run.
 - **`RETIREMENT` (`-2`).** Valid only on `Income.end`. Means "track this
   scenario's `retirement_year`" instead of a fixed year — resolved once,
   under *effective* assumptions (i.e. after any scenario override merges),
