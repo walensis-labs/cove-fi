@@ -152,10 +152,16 @@ heuristic, which is deprecated and ignored.
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
   instead of a single deterministic path. **Shipped.**
-- **0.3** — integrations (third-party import/export), portfolio mixes.
+- **0.3** — conversational onboarding (guided interview, plan discovery,
+  propose-only YNAB seeding). **Shipped.**
+- **0.4** — per-account/per-tax-class return overrides, gated cash-interest
+  taxation, correlated T-bill Monte Carlo cash sleeves, true CoastFIRE
+  `coast_year`. **This release.**
+- **Next** — integrations (third-party import/export), bond
+  series/portfolio mixes.
 
 Not yet: bond series/portfolio mixes, progressive-bracket taxes,
-third-party import/export integrations (targeted for 0.3).
+third-party import/export integrations.
 
 ## License
 

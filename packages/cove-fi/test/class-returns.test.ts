@@ -65,6 +65,20 @@ describe("per-class growth + gated cash tax", () => {
     expect(rows[0]!.taxes).toBe(0);
     expect(rows[0]!.net_worth).toBe(10_000);
   });
+  it("growth-carrying cash account is NEVER cash-taxed, even in a plan opted into class_returns.cash", () => {
+    // Spec ruling: cashTaxGated keys off whether the account's APPLIED
+    // rate comes from the new fields (acc.ret / class_returns.cash) —
+    // `growth` keeps absolute precedence in the resolution chain, so its
+    // presence means the applied rate is NOT from the new fields, full
+    // stop, regardless of what the plan's class_returns says. This is the
+    // exact case the final review flagged as wrongly taxed under the old
+    // plan-level gate ($1,240 taxed on a $10,000 * 0.04 balance it should
+    // never have touched).
+    const rows = run(probe([{ name: "c", tax: "cash", balance: 10_000, growth: 0.04 }],
+                           { class_returns: { cash: 0.03 } }));
+    expect(rows[0]!.taxes).toBe(0);
+    expect(rows[0]!.net_worth).toBeCloseTo(10_400, 6); // grows at growth (0.04), not class_returns.cash
+  });
   it("taxable grows at FULL resolved rate; dividend slice taxed only", () => {
     const rows = run(probe([{ name: "b", tax: "taxable", balance: 10_000, basis: 10_000, ret: 0.05 }],
                            { dividend_rate: 0.02 }));

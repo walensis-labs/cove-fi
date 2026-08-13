@@ -137,18 +137,25 @@ trial outcome.
 
 ### Cash-interest taxation (gated)
 
-A cash-class account's resolved growth rate is taxed as ordinary income —
-every year, working or retired — only when the household has explicitly
-opted into the new return model for that account:
+Cash interest is taxed only for cash accounts whose applied rate comes
+from the new fields (`account.ret` or `class_returns.cash`); accounts
+carrying the legacy `growth` field are never cash-taxed. `growth` keeps
+absolute precedence in the resolution chain (Return model, step 1 above),
+so its mere presence means the account's applied rate is NOT coming from
+the new fields — full stop, regardless of what a plan-level
+`class_returns.cash` says. This is a per-account, not per-plan, gate:
 
 ```
 cashTaxGated(acc, a) = acc.tax === "cash"
+  && acc.growth == null
   && (acc.ret != null || a.class_returns?.cash != null)
 ```
 
 An untouched or `growth`-only cash account stays untaxed, exactly
-matching 0.3.0 behavior — this is a strictly additive, opt-in change.
-When gated, the tax added each year is:
+matching 0.3.0 behavior — this is a strictly additive, opt-in change, and
+it holds even for a `growth`-carrying cash account sitting inside a plan
+that has otherwise opted into `class_returns.cash` for its other cash
+accounts. When gated, the tax added each year is:
 
 ```
 taxes += bal[acc] * growthRate[acc] * frac * (income_tax + local_tax)

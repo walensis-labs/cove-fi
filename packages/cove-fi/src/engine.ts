@@ -30,12 +30,16 @@ import {
 } from "./model.js";
 
 // A cash account's resolved growth rate is taxed as ordinary income only
-// when the household opted into the new per-class-return model for it —
-// either a per-account `ret` override or a plan-level `class_returns.cash`
-// default. Legacy cash accounts (growth-only, or untouched) stay untaxed,
-// preserving 0.3.0 behavior exactly.
+// when its APPLIED rate actually comes from the new per-account/per-class
+// fields — per-account `ret` or plan-level `class_returns.cash`. `growth`
+// (legacy) keeps absolute precedence in the resolution chain (see the
+// `growthRate` comment below), so a cash account carrying `growth` is
+// NEVER cash-taxed, even in a plan that has otherwise opted into
+// `class_returns.cash` — its rate doesn't come from the new fields, full
+// stop. This preserves 0.3.0 behavior exactly for every growth-carrying
+// cash account, opted-in plan or not.
 function cashTaxGated(acc: Account, a: Assumptions): boolean {
-  return acc.tax === "cash" && (acc.ret != null || a.class_returns?.cash != null);
+  return acc.tax === "cash" && acc.growth == null && (acc.ret != null || a.class_returns?.cash != null);
 }
 
 export interface YearRow {

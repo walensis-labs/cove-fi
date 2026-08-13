@@ -80,7 +80,10 @@ retirement spending — rather than a trailing-spend heuristic.
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
 - **0.3** — conversational onboarding (guided interview, plan discovery,
   propose-only YNAB seeding). **Shipped.**
-- **0.4** — integrations (third-party import/export), bond
+- **0.4** — per-account/per-tax-class return overrides, gated
+  cash-interest taxation, correlated T-bill Monte Carlo cash sleeves, true
+  CoastFIRE `coast_year`. **This release.**
+- **Next** — integrations (third-party import/export), bond
   series/portfolio mixes
 
 ## License
