@@ -99,10 +99,19 @@ function replayMortgage(
  * call. Used both by `coastTargetAtRetirement` (that year's P&I) and by
  * the in-loop coast test (netting the projected remaining balance at
  * retirement_year out of projected liquid balances).
+ *
+ * `assumptions` defaults to the plan's own (normalized) assumptions, but
+ * callers driving an overridden run (e.g. runWithMeta with a scenario's
+ * merged `a`) MUST pass that merged `a` explicitly — otherwise, if
+ * start_year or first_year_fraction were overridden, this replay would
+ * start from the plan's ORIGINAL values while the rest of the run (whose
+ * mortgage amortization is driven by the merged `a.start_year`) uses the
+ * override, silently desyncing the two.
  */
-export function mortgageBalanceAt(plan: Plan, year: number): number {
+export function mortgageBalanceAt(plan: Plan, year: number, assumptions?: Assumptions): number {
   const p = normalizePlan(plan);
-  return replayMortgage(p.house, p.assumptions.start_year, p.assumptions.first_year_fraction, year).balance;
+  const a = assumptions ?? p.assumptions;
+  return replayMortgage(p.house, a.start_year, a.first_year_fraction, year).balance;
 }
 
 /**
@@ -121,7 +130,17 @@ export function mortgageBalanceAt(plan: Plan, year: number): number {
  *     items at g^(start_year-e.start-1) and then multiplies every year
  *     start_year..R inclusive since e.start < start_year <= every such
  *     year, which telescopes to exactly g^(R-e.start)).
- *   - fund_from (529-funded) expenses excluded — not household cash flow.
+ *   - fund_from (529-funded) expenses excluded, because they're excluded
+ *     from the engine's own `exp` too whenever the 529 covers them in
+ *     full — that's the common case this closed form can express without
+ *     replaying the 529's own balance/contribution history to R.
+ *     LIMITATION: if the 529 would instead be DEPLETED by R, the engine's
+ *     per-year loop pushes the shortfall (`amt - take`) into `exp` (real
+ *     household cash flow that year) — this closed form has no way to
+ *     know that in advance, so it always excludes the full fund_from
+ *     amount regardless, understating the target for a plan whose 529
+ *     runs dry before retirement. See coast.test.ts's "fund_from" describe
+ *     block for a pin of this documented (not fixed) behavior.
  *   - house costs at R: property/insurance/maintenance on appreciated
  *     value, HOA inflated, and that year's mortgage P&I (0 once the loan
  *     is retired by R) — all frac-adjusted only when R === start_year,
@@ -206,7 +225,7 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
   // schedule), so every one of them is computed once here rather than
   // inside the year loop.
   const coastTarget = coastTargetAtRetirement(plan, a);
-  const coastMortgageBalanceAtR = mortgageBalanceAt(plan, a.retirement_year);
+  const coastMortgageBalanceAtR = mortgageBalanceAt(plan, a.retirement_year, a);
   const coastGrowthRate: Record<string, number> = {};
   for (const acc of plan.accounts) {
     coastGrowthRate[acc.name] = acc.growth ?? resolveRet(acc, a);

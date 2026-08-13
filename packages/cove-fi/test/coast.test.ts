@@ -300,23 +300,140 @@ describe("coast_multiple ignored", () => {
   });
 });
 
-describe("expectations rule holds under Monte Carlo / rates schedules", () => {
-  // Same shape as the COAST-rung plan above but with the contribution
-  // trimmed to $100k/yr instead of $200k — per the "COAST-rung interaction"
-  // hand-derivation, that sequence (165k, 305k, 436k, 559k, 673k projected
-  // through 2026-2030) never clears the 1,000,000 target, so this plan
-  // never coasts in the deterministic baseline either. That's deliberate:
-  // an all-crash schedule can only ever shrink realized balances relative
-  // to the +7%/yr baseline (every contributed dollar compounds DOWN at
-  // -90%/yr instead of up), and the coast projection multiplies that
-  // realized balance by the SAME deterministic rate in both cases — so
-  // Projected_crash(y) < Projected_baseline(y) at every y, term by term.
-  // If baseline never clears the target, crash provably can't either,
-  // which makes "both null" a rigorous equality here, not a coincidence —
-  // the strongest version of this assertion the brief's own "can't observe
-  // directly" caveat allows for.
-  function buildPlan(): Plan {
-    return normalizePlan({
+describe("coast projection RATE and TARGET are deterministic; realized balances are path-dependent", () => {
+  // Revision note: an earlier version of this describe block asserted
+  // "all-crash schedule cannot change coast_year" using a plan that never
+  // coasts in EITHER the baseline or the crash run — that assertion is
+  // mutation-vacuous (null === null passes regardless of whether the
+  // projection rate correctly stays deterministic or incorrectly leaks the
+  // schedule's rate; a deliberately-broken implementation that projects at
+  // the crashed rate instead of the deterministic one still returns null
+  // here, for the same "never clears the target" reason). The actual
+  // invariant the expectations rule promises is narrower and it's this
+  // block's title: the coast test's PROJECTION RATE (coastGrowthRate) and
+  // TARGET (coastTargetAtRetirement) never consult a rates schedule — but
+  // the REALIZED BALANCE fed into that projection is whatever the trial
+  // actually simulated, schedule included. So a crash CAN legitimately
+  // move coast_year later (or to null) by shrinking realized balances;
+  // what it can never do is change the RATE used to project them forward,
+  // or the TARGET they're compared against.
+
+  it("discriminating pin: coast_year on crashed realized balances, projected at the DETERMINISTIC class_returns rate — a schedule-leaking projection would return null instead", () => {
+    // Account "T": resolveRet resolves to class_returns.taxable = 0.06 (no
+    // acc.ret/acc.growth override, so a schedule dominates the ACTUAL
+    // simulated growth per the existing "rates schedule dominates ret/
+    // class_returns" rule — see class-returns.test.ts). All-crash schedule:
+    // ret = -0.5 every year, inflation pinned to a.inflation (0.03) so the
+    // target/expense side is untouched by the schedule at all.
+    //
+    // Same target as the closed-form pin above: 25 x 40000 x 1.03^10 ~=
+    // 1,343,916.38 (R = 2036, 10 years out).
+    //
+    // Realized balance under the crash: bal_y = B0 x 0.5^(y-2025) (a -50%
+    // haircut applied once per year, 2026..y inclusive). A CORRECT coast
+    // test projects that realized balance forward to R at the deterministic
+    // 0.06 rate: Projected(y) = bal_y x 1.06^(R-y). B0 = 2,000,000 is sized
+    // so this clears the target at y = 2026 (the very first evaluated year):
+    // bal_2026 = 2,000,000 x 0.5 = 1,000,000; Projected(2026) = 1,000,000 x
+    // 1.06^10 ~= 1,790,847 > 1,343,916.
+    //
+    // A LEAKING implementation that projects at the schedule's -0.5 instead
+    // of the deterministic 0.06 would compute Projected_leak(y) = bal_y x
+    // 0.5^(R-y) = B0 x 0.5^(R-2025) — CONSTANT across y (same rate both
+    // segments, per the file-header invariance argument) at 2,000,000 x
+    // 0.5^11 ~= 976.56, nowhere near the target for ANY y — i.e. it would
+    // return null instead of 2026. That gap is what this pin discriminates.
+    const a = { ...DEFAULT_ASSUMPTIONS, start_year: 2026, end_year: 2036, retirement_year: 2036, inflation: 0.03, fi_multiple: 25, class_returns: { taxable: 0.06 } };
+    const plan: Plan = normalizePlan({
+      birth_year: 1990,
+      accounts: [{ name: "T", tax: "taxable", balance: 2_000_000, basis: 2_000_000 }],
+      incomes: [{ name: "salary", amount: 200_000, start: 2026, end: 2035 }],
+      social_security: [],
+      expenses: [{ name: "living", amount: 40_000, start: 2026, end: 2091 }],
+      contributions: [],
+      house: null,
+      assumptions: a,
+    });
+    const target = coastTargetAtRetirement(plan, a);
+
+    const allCrash: YearRates[] = [];
+    for (let y = a.start_year; y <= a.end_year; y++) allCrash.push({ year: y, ret: -0.5, inflation: a.inflation });
+
+    // Independent hand replay: realized balance follows the CRASH schedule
+    // (-0.5/yr); projection uses the DETERMINISTIC class_returns rate
+    // (0.06) — exactly the rule under test, computed separately from the
+    // engine.
+    let bal = 2_000_000;
+    let expectedCoastYear: number | null = null;
+    for (let y = 2026; y < 2036; y++) {
+      bal *= 1 - 0.5;
+      const projected = bal * 1.06 ** (2036 - y);
+      if (expectedCoastYear === null && projected >= target) expectedCoastYear = y;
+    }
+    expect(expectedCoastYear).toBe(2026);
+
+    const { coast_year } = runWithMeta(plan, undefined, allCrash);
+    expect(coast_year).toBe(expectedCoastYear); // fails (null) on a schedule-leaking projection
+  });
+
+  it("target invariance: coastTargetAtRetirement is bit-identical before and after a schedule-driven run of the same plan", () => {
+    // coastTargetAtRetirement doesn't take a rates parameter at all, so
+    // this is really a purity/no-side-effect check: running the plan
+    // through an all-crash schedule must not mutate plan/assumptions (or
+    // touch any module-level state) in a way that would change what the
+    // target function — called completely independently afterward —
+    // computes.
+    const a = { ...DEFAULT_ASSUMPTIONS, start_year: 2026, end_year: 2036, retirement_year: 2036, inflation: 0.03, fi_multiple: 25 };
+    const plan: Plan = normalizePlan({
+      birth_year: 1990,
+      accounts: [{ name: "T", tax: "taxable", balance: 100_000, basis: 100_000 }],
+      incomes: [{ name: "salary", amount: 200_000, start: 2026, end: 2035 }],
+      social_security: [],
+      expenses: [{ name: "living", amount: 40_000, start: 2026, end: 2091 }],
+      contributions: [],
+      house: null,
+      assumptions: a,
+    });
+    const allCrash: YearRates[] = [];
+    for (let y = a.start_year; y <= a.end_year; y++) allCrash.push({ year: y, ret: -0.5, inflation: a.inflation });
+
+    const targetBefore = coastTargetAtRetirement(plan, a);
+    runWithMeta(plan, undefined, allCrash);
+    const targetAfter = coastTargetAtRetirement(plan, a);
+    expect(targetAfter).toBe(targetBefore);
+  });
+
+  it("path-dependence acknowledged: an all-crash schedule on the $200k-rung plan moves coast_year later-or-null, never earlier", () => {
+    // Reuses the exact plan from "COAST-rung interaction" above, where the
+    // deterministic baseline coasts at 2029. Every contributed dollar
+    // compounds DOWN under the crash (-0.9/yr) instead of up (+0.07/yr,
+    // baseline), so realized balances are strictly smaller at every y under
+    // the crash than the baseline — and the projection multiplies by the
+    // SAME deterministic rate in both cases — so Projected_crash(y) <
+    // Projected_baseline(y) pointwise for every y. Crash can only push the
+    // first crossing later (or eliminate it), never earlier.
+    const plan: Plan = normalizePlan({
+      birth_year: 1990,
+      accounts: [{ name: "B", tax: "taxable", balance: 10_000, basis: 10_000 }],
+      incomes: [{ name: "salary", amount: 500_000, start: 2026, end: 2030 }],
+      social_security: [],
+      expenses: [{ name: "living", amount: 40_000, start: 2026, end: 2091 }],
+      contributions: [{ account: "B", start: 2026, end: COAST, amount: 200_000 }],
+      house: null,
+      assumptions: { ...DEFAULT_ASSUMPTIONS, start_year: 2026, end_year: 2032, retirement_year: 2031, inflation: 0, fi_multiple: 25, ret: 0.07 },
+    });
+    const a = plan.assumptions;
+    const allCrash: YearRates[] = [];
+    for (let y = a.start_year; y <= a.end_year; y++) allCrash.push({ year: y, ret: -0.9, inflation: a.inflation });
+
+    const baseline = runWithMeta(plan).coast_year;
+    expect(baseline).not.toBeNull(); // sanity: matches the "COAST-rung interaction" derivation (2029)
+    const crashed = runWithMeta(plan, undefined, allCrash).coast_year;
+    expect(crashed === null || crashed > baseline!).toBe(true);
+  });
+
+  it("fixed seed => identical Monte Carlo results on a COAST-rung plan", () => {
+    const plan: Plan = normalizePlan({
       birth_year: 1990,
       accounts: [{ name: "B", tax: "taxable", balance: 10_000, basis: 10_000 }],
       incomes: [{ name: "salary", amount: 500_000, start: 2026, end: 2030 }],
@@ -326,25 +443,139 @@ describe("expectations rule holds under Monte Carlo / rates schedules", () => {
       house: null,
       assumptions: { ...DEFAULT_ASSUMPTIONS, start_year: 2026, end_year: 2032, retirement_year: 2031, inflation: 0, fi_multiple: 25, ret: 0.07 },
     });
-  }
-
-  it("fixed seed => identical Monte Carlo results on a COAST-rung plan", () => {
-    const plan = buildPlan();
     const r1 = runMonteCarlo(plan, { trials: 30, seed: 42 });
     const r2 = runMonteCarlo(plan, { trials: 30, seed: 42 });
     expect(r1).toEqual(r2);
   });
+});
 
-  it("an all-crash sampled schedule cannot move coast_year — the test ignores sampled rates entirely", () => {
-    const plan = buildPlan();
-    const a = plan.assumptions;
-    const allCrash: YearRates[] = [];
-    for (let y = a.start_year; y <= a.end_year; y++) {
-      allCrash.push({ year: y, ret: -0.9, inflation: a.inflation });
+describe("coastGrowthRate resolution — dedicated acc.growth and class_returns branch coverage", () => {
+  // Both cases: same target as the closed-form pin (25 x 40000 x 1.03^10 ~=
+  // 1,343,916.38, R = 2036), a single nonzero-balance account with no
+  // contributions, sized so the CORRECT rate clears the target at
+  // start_year while the WRONG fallback rate (a.ret = 0.07) would not —
+  // i.e. each test fails if coastGrowthRate's branch under test were
+  // accidentally skipped in favor of the a.ret fallback.
+  const a = { ...DEFAULT_ASSUMPTIONS, start_year: 2026, end_year: 2036, retirement_year: 2036, inflation: 0.03, fi_multiple: 25, ret: 0.07 };
+  const target = 25 * 40_000 * 1.03 ** 10;
+  const expenses = [{ name: "living", amount: 40_000, start: 2026, end: 2091 }];
+  const incomes = [{ name: "salary", amount: 200_000, start: 2026, end: 2035 }];
+
+  it("acc.growth (legacy field) takes absolute precedence, even with a nonzero balance", () => {
+    // 550,000 @ 10% (acc.growth) clears (550000*1.10^11 ~= 1,569,214 >=
+    // target) but @ 7% (a.ret, the wrong fallback) would NOT (550000*1.07^11
+    // ~= 1,157,668 < target).
+    const plan: Plan = normalizePlan({
+      birth_year: 1990,
+      accounts: [{ name: "G", tax: "taxable", balance: 550_000, basis: 550_000, growth: 0.1 }],
+      incomes,
+      social_security: [],
+      expenses,
+      contributions: [],
+      house: null,
+      assumptions: a,
+    });
+    expect(runWithMeta(plan).coast_year).toBe(2026);
+  });
+
+  it("assumptions.class_returns[tax] resolves through resolveRet when no acc.ret/growth override is set", () => {
+    // 580,000 @ 9% (class_returns.taxable) clears (580000*1.09^11 ~=
+    // 1,496,647 >= target) but @ 7% (a.ret, the wrong fallback) would NOT
+    // (580000*1.07^11 ~= 1,220,814 < target).
+    const plan: Plan = normalizePlan({
+      birth_year: 1990,
+      accounts: [{ name: "C", tax: "taxable", balance: 580_000, basis: 580_000 }],
+      incomes,
+      social_security: [],
+      expenses,
+      contributions: [],
+      house: null,
+      assumptions: { ...a, class_returns: { taxable: 0.09 } },
+    });
+    expect(runWithMeta(plan).coast_year).toBe(2026);
+  });
+});
+
+describe("mortgageBalanceAt — merged-assumptions bug fix (runWithMeta must not replay from stale plan defaults under an override)", () => {
+  // Fixed: mortgageBalanceAt used to always replay from the PLAN's own
+  // (unmerged) start_year/first_year_fraction, even when called from
+  // runWithMeta with a scenario's merged `a` — so an overridden start_year
+  // would desync the coast-netting replay from the rest of the run (whose
+  // mortgage amortization is driven by the merged start_year). The
+  // optional third `assumptions` argument fixes this; this pins that it's
+  // actually threaded through, not just accepted and ignored.
+  const plan: Plan = normalizePlan({
+    birth_year: 1990,
+    accounts: [],
+    incomes: [],
+    social_security: [],
+    expenses: [],
+    contributions: [],
+    house: { value: 300_000, appreciation: 0.03, mortgage: { balance: 100_000, rate: 0.05, payment_monthly: 700 } },
+    assumptions: { ...DEFAULT_ASSUMPTIONS, start_year: 2026, end_year: 2035, first_year_fraction: 1.0 },
+  });
+
+  function refReplay(startYear: number, uptoYear: number): number {
+    let bal = 100_000;
+    for (let y = startYear; y <= uptoYear; y++) {
+      for (let m = 0; m < 12 && bal > 0; m++) {
+        const interest = (bal * 0.05) / 12;
+        const principal = Math.min(700 - interest, bal);
+        bal -= principal;
+      }
     }
-    const withoutSchedule = runWithMeta(plan);
-    const withCrashSchedule = runWithMeta(plan, undefined, allCrash);
-    expect(withoutSchedule.coast_year).toBeNull(); // sanity: confirms the "never coasts" derivation above
-    expect(withCrashSchedule.coast_year).toBe(withoutSchedule.coast_year);
+    return bal;
+  }
+
+  it("an overridden start_year (2028) replays 2 fewer years than the plan default (2026), leaving a strictly higher balance at the same target year", () => {
+    const atPlanDefault = mortgageBalanceAt(plan, 2030); // replays 2026..2030 (5 years)
+    const atOverriddenStart = mortgageBalanceAt(plan, 2030, { ...plan.assumptions, start_year: 2028 }); // replays 2028..2030 (3 years)
+    expect(atOverriddenStart).toBeGreaterThan(atPlanDefault);
+    expect(atOverriddenStart).toBeCloseTo(refReplay(2028, 2030), 6);
+    expect(atPlanDefault).toBeCloseTo(refReplay(2026, 2030), 6);
+  });
+});
+
+describe("coastTargetAtRetirement — fund_from (529) exclusion, including the documented under-funded-529 limitation", () => {
+  // "college" is fund_from-drawn from a 529 seeded with only $5,000 —
+  // it drains within the expense's first active year (2030) and stays
+  // empty, so by retirement_year (2035) the engine's OWN row.expenses
+  // includes the full shortfall as real household cash flow (the 529
+  // covers none of it that year). coastTargetAtRetirement excludes the
+  // fund_from expense unconditionally regardless — this pins that
+  // documented gap, it does not fix it (see engine.ts's doc comment).
+  const a = { ...DEFAULT_ASSUMPTIONS, start_year: 2026, end_year: 2035, retirement_year: 2035, inflation: 0.03, fi_multiple: 25 };
+  const plan: Plan = normalizePlan({
+    birth_year: 1990,
+    accounts: [{ name: "college529", tax: "529", balance: 5_000, liquid: false }],
+    incomes: [{ name: "salary", amount: 100_000, start: 2026, end: 2034 }],
+    social_security: [],
+    expenses: [
+      { name: "living", amount: 20_000, start: 2026, end: 2091 },
+      { name: "college", amount: 10_000, start: 2030, end: 2040, fund_from: "college529" },
+    ],
+    contributions: [],
+    house: null,
+    assumptions: a,
+  });
+
+  it("target excludes the fund_from expense entirely, even though the 529 is long depleted by R and the engine's own row.expenses includes the full shortfall", () => {
+    const { rows } = runWithMeta(plan);
+    const rYear = rows.find((r) => r.year === 2035)!;
+
+    // The 529 (grown at a.ret=0.07 from 2026) is far too small to cover
+    // even year one (2030) of a $10k/yr draw, so every year from 2030
+    // onward — including 2035 — the FULL grown amount is unfunded shortfall
+    // baked into row.expenses.
+    const livingGrownAtR = 20_000 * 1.03 ** (2035 - 2026);
+    const collegeGrownAtR = 10_000 * 1.03 ** (2035 - 2026); // same today's-$ convention as living
+    expect(rYear.expenses).toBeCloseTo(livingGrownAtR + collegeGrownAtR, 2);
+
+    // coastTargetAtRetirement's implied spend = target / fi_multiple —
+    // matches ONLY the living expense, confirming college is excluded
+    // wholesale (not partially, not at all), regardless of 529 depletion.
+    const impliedSpend = coastTargetAtRetirement(plan, a) / a.fi_multiple;
+    expect(impliedSpend).toBeCloseTo(livingGrownAtR, 2);
+    expect(impliedSpend).toBeLessThan(rYear.expenses); // the documented understatement
   });
 });

@@ -49,7 +49,10 @@ internally-chosen target.
   Savings: Choosing a Withdrawal Rate That Is Sustainable."* AAII Journal
   — the "Trinity study." Source of the ~98% historical success rate for a
   4% initial withdrawal, 100% stocks, 30-year horizon, and of the
-  `fi_multiple = 25` (`1/0.04`) and `coast_multiple` defaults.
+  `fi_multiple = 25` (`1/0.04`) default. (`coast_multiple` is 0.4-
+  deprecated and read nowhere — coast now derives from this same
+  `fi_multiple` threshold, projected to `retirement_year`, rather than its
+  own separate multiple.)
 - Bengen, W. P. (1994). *"Determining Withdrawal Rates Using Historical
   Data."* Journal of Financial Planning. Establishes the direction the
   benchmark test also checks: success rate falls as the withdrawal rate
