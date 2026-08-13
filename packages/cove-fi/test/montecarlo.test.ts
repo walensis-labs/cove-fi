@@ -3,6 +3,34 @@ import { mulberry32, runMonteCarlo, sampleSchedule } from "../src/montecarlo.js"
 import { planFromJson } from "../src/planjson.js";
 import { syntheticPlan } from "./helpers/synthetic.js";
 
+// Invested-only probe: NO cash-class accounts at all, so the upcoming
+// cash_ret wiring (Task 5 — cash sleeves follow a correlated T-bill path)
+// has literally nothing to touch here. Every account is taxable/trad/roth,
+// so growth is driven entirely by the sampled sp500 path.
+function investedOnlyProbe() {
+  return planFromJson({
+    birth_year: 1990,
+    accounts: [
+      { name: "brokerage", tax: "taxable", balance: 50_000, basis: 20_000 },
+      { name: "401k", tax: "trad", balance: 100_000 },
+      { name: "roth", tax: "roth", balance: 20_000 },
+    ],
+    incomes: [{ name: "salary", amount: 90_000, start: 2026, end: 2051 }],
+    social_security: [],
+    contributions: [
+      { account: "401k", start: 2026, end: 2051, amount: 10_000, pretax: true },
+      { account: "roth", start: 2026, end: 2051, amount: 5_000 },
+    ],
+    expenses: [{ name: "living", amount: 40_000, start: 2026, end: 2060 }],
+    house: null,
+    assumptions: {
+      start_year: 2026, end_year: 2060, first_year_fraction: 1.0, retirement_year: 2052,
+      dividend_rate: 0.015, inflation: 0.03, ret: 0.07, income_tax: 0.3, local_tax: 0.01,
+      cap_gains_tax: 0.15, coast_multiple: 4.0, fi_multiple: 25.0,
+    },
+  });
+}
+
 describe("monte carlo", () => {
   it("mulberry32 is deterministic and uniform-ish", () => {
     const a = mulberry32(42), b = mulberry32(42);
@@ -44,6 +72,22 @@ describe("monte carlo", () => {
   });
   it("trials: 10.5 throws with positive integer error", () => {
     expect(() => runMonteCarlo(syntheticPlan(), { trials: 10.5 })).toThrow(/positive integer/);
+  });
+});
+
+describe("pure-equity MC pin (Task 5 — cash path, captured BEFORE cash_ret wiring)", () => {
+  // sp500 path must not move when cash_ret wiring lands: this plan has no
+  // cash-class accounts, so every account's growth comes from resolveRet()
+  // -> the sampled sp500 path, untouched by the cash_ret schedule field
+  // Task 5 adds. Values below were captured by running this exact
+  // runMonteCarlo call against pre-Task-5 code (seed 11, 200 trials) —
+  // committed separately, BEFORE any cash_ret wiring, as the regression pin.
+  it("invested-only plan MC output is pinned (must survive cash_ret wiring unchanged)", () => {
+    const r = runMonteCarlo(investedOnlyProbe(), { trials: 200, seed: 11 });
+    expect(r.success_rate).toBeCloseTo(0.99, 10);
+    expect(r.percentiles.p10[r.years.length - 1]).toBeCloseTo(1_314_104.1595670753, 4);
+    expect(r.percentiles.p50[r.years.length - 1]).toBeCloseTo(9_971_233.59005253, 4);
+    expect(r.percentiles.p90[r.years.length - 1]).toBeCloseTo(29_564_293.282805584, 4);
   });
 });
 
