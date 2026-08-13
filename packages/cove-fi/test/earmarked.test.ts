@@ -11,8 +11,11 @@
  * validation.
  */
 import { describe, expect, it } from "vitest";
-import { COAST, normalizePlan, RETIREMENT, type Plan } from "../src/model.js";
+import { run, runWithMeta } from "../src/engine.js";
+import { COAST, DEFAULT_ASSUMPTIONS, normalizePlan, RETIREMENT, type Plan } from "../src/model.js";
 import { planFromJson } from "../src/planjson.js";
+import { runMonteCarlo } from "../src/montecarlo.js";
+import { Session } from "../src/session.js";
 import { syntheticPlan } from "./helpers/synthetic.js";
 
 // syntheticPlan() is already normalized (built via normalizePlan), and
@@ -162,5 +165,154 @@ describe("Contribution.hard_end", () => {
     const p = basePlan();
     (p.contributions[0] as unknown as Record<string, unknown>).hard_end = "2050";
     expect(() => planFromJson(p)).toThrowError(/hard_end/);
+  });
+});
+
+/**
+ * 0.5.0 Task 3: the engine now reads Account.earmarked. Earmarked balances
+ * sum into YearRow.earmarked_net_worth and are EXCLUDED from net_worth;
+ * legacy `liquid:false` non-earmarked accounts (e.g. a 529) are unaffected
+ * — they stay inside net_worth exactly as before (il529 path unchanged).
+ * liquid_net_worth is untouched either way (earmarked already implies
+ * non-liquid, so it was never counted there).
+ */
+describe("engine — earmarked NW reporting split", () => {
+  function buildPlan(): Plan {
+    return normalizePlan({
+      birth_year: 1990,
+      accounts: [
+        { name: "liquid", tax: "taxable", balance: 50_000, basis: 50_000, growth: 0 },
+        // earmarked:true forces liquid:false (normalizePlan) — explicit
+        // liquid left absent to exercise that default path too.
+        { name: "house_fund", tax: "cash", balance: 20_000, growth: 0, earmarked: true },
+        // legacy liquid:false, non-earmarked — the pre-0.5.0 il529 path.
+        { name: "college529", tax: "529", balance: 10_000, growth: 0, liquid: false },
+      ],
+      incomes: [],
+      social_security: [],
+      expenses: [],
+      contributions: [],
+      house: null,
+      assumptions: { ...DEFAULT_ASSUMPTIONS, start_year: 2026, end_year: 2026, retirement_year: 2050 },
+    });
+  }
+
+  it("earmarked balance sums into earmarked_net_worth and is excluded from net_worth; legacy liquid:false stays in net_worth; liquid_net_worth untouched", () => {
+    const [row] = run(buildPlan());
+    expect(row!.earmarked_net_worth).toBe(20_000);
+    // net_worth = liquid (50,000) + legacy il529 (10,000) + house value (0) -
+    // mortgage (0) — house_fund's 20,000 is excluded entirely.
+    expect(row!.net_worth).toBe(60_000);
+    expect(row!.liquid_net_worth).toBe(50_000);
+  });
+});
+
+describe("engine — earmarked exclusion pins (coast/fi/depletion/MC keyed off liquid, unaffected by earmarked balance)", () => {
+  // "B" (hsa — withdrawals carry no capital-gains gross-up, so there is no
+  // residual leak into the drawdown order's "cash" tier) is the plan's only
+  // LIQUID account and drives coast/fi/depletion/MC entirely on its own;
+  // "house_fund" (earmarked, tax "cash" — last in the drawdown order) is
+  // sized so it's never touched by the retirement waterfall (B alone
+  // comfortably covers every year's need across the whole horizon) — a
+  // precondition for the "scales by exactly 100x" assertion below to hold
+  // (if the waterfall ever drew from it, the residual would be a FIXED
+  // dollar amount independent of its starting balance, breaking exact
+  // proportionality).
+  function buildPlan(earmarkedBalance: number): Plan {
+    return normalizePlan({
+      birth_year: 1990,
+      accounts: [
+        { name: "B", tax: "hsa", balance: 10_000 },
+        { name: "house_fund", tax: "cash", balance: earmarkedBalance, growth: 0, earmarked: true },
+      ],
+      incomes: [{ name: "salary", amount: 500_000, start: 2026, end: 2030 }],
+      social_security: [],
+      expenses: [{ name: "living", amount: 40_000, start: 2026, end: 2091 }],
+      contributions: [{ account: "B", start: 2026, end: COAST, amount: 200_000 }],
+      house: null,
+      assumptions: {
+        ...DEFAULT_ASSUMPTIONS,
+        start_year: 2026,
+        end_year: 2060,
+        retirement_year: 2031,
+        inflation: 0,
+        fi_multiple: 25,
+        ret: 0.07,
+      },
+    });
+  }
+
+  it("inflating the earmarked balance 100x moves fi_year/coast_year/depletion_year/MC success_rate/net_worth NOT AT ALL, and earmarked_net_worth EXACTLY 100x", () => {
+    const plan1 = buildPlan(5_000);
+    const plan2 = buildPlan(500_000);
+
+    const session1 = new Session();
+    session1.plan = plan1;
+    const session2 = new Session();
+    session2.plan = plan2;
+    const fi1 = session1.fiStatus();
+    const fi2 = session2.fiStatus();
+
+    // sanity: this probe actually exercises non-trivial fi/coast (not a
+    // vacuous null === null check).
+    expect(fi1.coast_year).not.toBeNull();
+    expect(fi1.fi_year).not.toBeNull();
+
+    expect(fi2.coast_year).toBe(fi1.coast_year);
+    expect(fi2.fi_year).toBe(fi1.fi_year);
+    expect(fi2.depletion_year).toBe(fi1.depletion_year);
+    expect(fi2.terminal_net_worth).toBe(fi1.terminal_net_worth);
+
+    expect(fi1.terminal_earmarked_net_worth).toBe(5_000);
+    expect(fi2.terminal_earmarked_net_worth).toBeCloseTo(fi1.terminal_earmarked_net_worth * 100, 6);
+
+    const mc1 = runMonteCarlo(plan1, { trials: 30, seed: 42 });
+    const mc2 = runMonteCarlo(plan2, { trials: 30, seed: 42 });
+    expect(mc2.success_rate).toBe(mc1.success_rate);
+  });
+});
+
+describe("fund_from drawdown from an earmarked account — existing engine mechanic re-pinned under the earmarked NW split", () => {
+  // Identical plans except accounts[0].earmarked — the fund_from loop reads
+  // bal[name] directly and has never consulted `liquid`/`earmarked`, so the
+  // withdrawal timeline/amounts (and every other cash-flow field) must come
+  // out byte-identical. The ONLY difference the earmarked flag should make
+  // is where that account's balance is reported: inside net_worth (legacy,
+  // earmarked:false) vs inside earmarked_net_worth (earmarked:true).
+  function buildPlan(earmarked: boolean): Plan {
+    return normalizePlan({
+      birth_year: 1990,
+      accounts: [{ name: "college529", tax: "529", balance: 12_000, liquid: false, earmarked }],
+      incomes: [{ name: "salary", amount: 100_000, start: 2026, end: 2051 }],
+      social_security: [],
+      expenses: [
+        { name: "base", amount: 40_000, start: 2026, end: 2091 },
+        { name: "college", amount: 15_000, start: 2040, end: 2043, fund_from: "college529" },
+      ],
+      contributions: [],
+      house: null,
+      assumptions: { ...DEFAULT_ASSUMPTIONS, start_year: 2026, end_year: 2045, retirement_year: 2052 },
+    });
+  }
+
+  it("withdrawals/expenses/income/taxes are byte-identical whether or not the source account is earmarked; only the NW split moves", () => {
+    const legacy = run(buildPlan(false));
+    const earmarkedRun = run(buildPlan(true));
+    expect(earmarkedRun.length).toBe(legacy.length);
+    let sawWithdrawal = false;
+    for (let i = 0; i < legacy.length; i++) {
+      const l = legacy[i]!;
+      const e = earmarkedRun[i]!;
+      expect(e.withdrawals).toBe(l.withdrawals);
+      expect(e.expenses).toBe(l.expenses);
+      expect(e.income).toBe(l.income);
+      expect(e.taxes).toBe(l.taxes);
+      if (l.withdrawals > 0) sawWithdrawal = true;
+      // legacy: the 529's balance stays inside net_worth, never reported as
+      // earmarked. earmarked: it moves out of net_worth entirely.
+      expect(l.earmarked_net_worth).toBe(0);
+      expect(e.net_worth + e.earmarked_net_worth).toBeCloseTo(l.net_worth, 6);
+    }
+    expect(sawWithdrawal).toBe(true); // sanity: fund_from actually fired
   });
 });

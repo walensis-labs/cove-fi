@@ -61,6 +61,11 @@ export interface FiStatus {
   depletion_year: number | null;
   terminal_net_worth: number;
   terminal_net_worth_todays: number;
+  // 0.5.0: last row's earmarked_net_worth (engine.YearRow) and its
+  // today's-$ equivalent — same last-row + deflator pattern as
+  // terminal_net_worth/terminal_net_worth_todays above.
+  terminal_earmarked_net_worth: number;
+  terminal_earmarked_net_worth_todays: number;
   retirement_year: number;
 }
 
@@ -182,6 +187,8 @@ function computeFiStatus(rows: YearRow[], a: Assumptions, coastYear: number | nu
     depletion_year: computeDepletionYear(rows, a.retirement_year),
     terminal_net_worth: last.net_worth,
     terminal_net_worth_todays: last.net_worth / factor,
+    terminal_earmarked_net_worth: last.earmarked_net_worth,
+    terminal_earmarked_net_worth_todays: last.earmarked_net_worth / factor,
     retirement_year: a.retirement_year,
   };
 }

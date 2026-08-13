@@ -46,6 +46,13 @@ export interface YearRow {
   year: number;
   net_worth: number;
   liquid_net_worth: number;
+  // 0.5.0: sum of earmarked accounts' balances this year (0 when the plan
+  // has none). Earmarked accounts are EXCLUDED from `net_worth` — they're
+  // saved toward a specific goal (e.g. a house fund), not general-purpose
+  // net worth — but included here so callers can still see the money.
+  // Legacy `liquid:false` non-earmarked accounts (e.g. a 529) are
+  // unaffected: they stay inside `net_worth`, exactly as before 0.5.0.
+  earmarked_net_worth: number;
   income: number;
   expenses: number;
   taxes: number;
@@ -268,6 +275,7 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
       year: y,
       net_worth: 0.0,
       liquid_net_worth: 0.0,
+      earmarked_net_worth: 0.0,
       income: 0.0,
       expenses: 0.0,
       taxes: 0.0,
@@ -373,6 +381,11 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
         let newPretax = 0.0;
         for (const c of plan.contributions) {
           if ((c.end === COAST && inCoast) || (c.start === COAST && !inCoast)) {
+            continue;
+          }
+          // 0.5.0: a plain hard_end caps this rung independent of `end`
+          // (including a COAST-end rung) — whichever ends first governs.
+          if (c.hard_end != null && y > c.hard_end) {
             continue;
           }
           const cs = c.start !== COAST ? c.start : (coastYear as number) + 1;
@@ -526,9 +539,12 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
 
     let liquid = 0.0;
     let il529 = 0.0;
+    let earmarked = 0.0;
     for (const acc of plan.accounts) {
       if (acc.liquid) {
         liquid += bal[acc.name]!;
+      } else if (acc.earmarked) {
+        earmarked += bal[acc.name]!;
       } else {
         il529 += bal[acc.name]!;
       }
@@ -536,6 +552,7 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
     const hv2 = h ? h.value * (1 + h.appreciation) ** (y - a.start_year + 1) : 0.0;
     row.liquid_net_worth = liquid - mortBal;
     row.net_worth = liquid + il529 + hv2 - mortBal;
+    row.earmarked_net_worth = earmarked;
     rows.push(row);
 
     // True-CoastFIRE expectations test (replaces the old trailing-spend x
