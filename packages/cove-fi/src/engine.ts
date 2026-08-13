@@ -134,16 +134,18 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
     const ordRate = a.income_tax + a.local_tax;
 
     // Resolved growth rate per account for this year: the legacy `growth`
-    // field keeps absolute precedence; otherwise resolveRet() (account ->
-    // class_returns -> plan default), with the plan default swapped for
-    // this year's scheduled rate so a `rates` schedule still drives any
-    // account that isn't opted into the new per-class-return fields.
-    // Computed once and reused by both the cash-tax gate below and the
-    // growth loop at the end of the year, so tax and growth never drift.
-    const yearRet = rateFor(y).ret;
+    // field keeps absolute precedence over everything, always. Otherwise:
+    // when a `rates` schedule is present, sampled paths are dominant —
+    // the schedule's ret wins over both acc.ret and class_returns (MC
+    // scenario shocks must not be short-circuited by a per-account/class
+    // override). Only in the no-schedule case does resolveRet()'s account
+    // -> class_returns -> plan-default chain apply. Computed once and
+    // reused by both the cash-tax gate below and the growth loop at the
+    // end of the year, so tax and growth never drift.
+    const yr = rateFor(y);
     const growthRate: Record<string, number> = {};
     for (const acc of plan.accounts) {
-      growthRate[acc.name] = acc.growth ?? resolveRet(acc, { ...a, ret: yearRet });
+      growthRate[acc.name] = acc.growth ?? (rates ? yr.ret : resolveRet(acc, a));
     }
 
     // ---------- income ----------

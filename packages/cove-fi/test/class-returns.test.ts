@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { run } from "../src/engine.js";
-import { resolveRet } from "../src/model.js";
+import { run, type YearRates } from "../src/engine.js";
+import { DEFAULT_ASSUMPTIONS, normalizePlan, resolveRet } from "../src/model.js";
 import { planFromJson } from "../src/planjson.js";
 
 const golden = (f: string) =>
@@ -70,5 +70,41 @@ describe("per-class growth + gated cash tax", () => {
                            { dividend_rate: 0.02 }));
     expect(rows[0]!.net_worth).toBeCloseTo(10_500, 6);           // full 5%
     expect(rows[0]!.taxes).toBeCloseTo(10_000 * 0.02 * 0.15, 6); // slice only
+  });
+});
+
+describe("rates schedule dominates ret/class_returns (invested-ignored-in-MC rule)", () => {
+  // Mirrors rates-schedule.test.ts's "an account with explicit growth
+  // ignores the schedule's ret" — but for the *new* per-class-return
+  // fields: unlike legacy `growth` (which always wins), `ret` and
+  // `class_returns` are meant to be dominated by a rates schedule when
+  // one is present, so sampled MC paths aren't short-circuited by a
+  // per-account/class override.
+  const shockSchedule = (a: { start_year: number; end_year: number; inflation: number }): YearRates[] => {
+    const out: YearRates[] = [];
+    for (let y = a.start_year; y <= a.end_year; y++) out.push({ year: y, ret: -0.5, inflation: a.inflation });
+    return out;
+  };
+  it("account ret override still follows the schedule when one is present", () => {
+    const plan = normalizePlan({
+      birth_year: 1990,
+      accounts: [{ name: "r", tax: "roth", balance: 1000, ret: 0.05 }],
+      incomes: [], social_security: [], expenses: [], contributions: [],
+      assumptions: { ...DEFAULT_ASSUMPTIONS },
+    });
+    const rows = run(plan, undefined, shockSchedule(plan.assumptions));
+    // schedule dominates acc.ret: collapses at -50%/yr, not +5%/yr
+    expect(rows[0]!.net_worth).toBeCloseTo(500, 6);
+  });
+  it("class_returns rate still follows the schedule when one is present", () => {
+    const plan = normalizePlan({
+      birth_year: 1990,
+      accounts: [{ name: "b", tax: "taxable", balance: 1000, basis: 1000 }],
+      incomes: [], social_security: [], expenses: [], contributions: [],
+      assumptions: { ...DEFAULT_ASSUMPTIONS, dividend_rate: 0, class_returns: { taxable: 0.05 } },
+    });
+    const rows = run(plan, undefined, shockSchedule(plan.assumptions));
+    // schedule dominates class_returns.taxable: collapses, not +5%/yr
+    expect(rows[0]!.net_worth).toBeCloseTo(500, 6);
   });
 });
