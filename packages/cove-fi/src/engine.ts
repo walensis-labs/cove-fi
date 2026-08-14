@@ -73,9 +73,59 @@ export interface YearRates {
   cash_ret?: number;
 }
 
+// 0.6.0: opt-in per-year engine detail — the substrate the cash-flow audit
+// tool renders. Populated ONLY when runWithMeta is called with
+// `{ detail: true }`; every YearRow total above is computed exactly as
+// before regardless of this flag (see the accumulator comments in the year
+// loop for how each bucket maps back onto `taxes`, etc.).
+export interface YearDetail {
+  year: number;
+  // Every plan.incomes line active this year, in plan order, at its grossed
+  // gross amount (amount x inflation factor x frac) — the same `amt` the
+  // engine adds into `gross`. Social Security is NOT included here (it has
+  // its own claim-year gating and haircut); sum(incomes[].amount) + the
+  // year's SS gross equals row.income.
+  incomes: { name: string; amount: number }[];
+  // Every plan.expenses line active this year, in plan order. For a
+  // fund_from (529-funded) line, funded_from_account is the amount actually
+  // drawn from that account and funded_from_cash_flow is the shortfall that
+  // fell through to household cash flow (the case the audit tool flags);
+  // for a plain expense, funded_from_account is 0 and funded_from_cash_flow
+  // is the full amount. funded_from_account + funded_from_cash_flow always
+  // equals `amount`.
+  expenses: {
+    name: string;
+    amount: number;
+    fund_from?: string | null;
+    funded_from_account: number;
+    funded_from_cash_flow: number;
+  }[];
+  // One entry per active contribution rung for the year (in plan order,
+  // from the FINAL converged iteration of the pretax waterfall) — including
+  // rungs squeezed to a 0 amount by exhausted cash flow, since that's
+  // exactly what the audit tool needs to see. sum(amount) equals
+  // row.contributions.
+  contributions: { account: string; name?: string; amount: number; match: number }[];
+  // One entry per actual withdrawal this year: 529 draws, the retirement
+  // drawdown waterfall, and RMDs. sum(amount) equals row.withdrawals.
+  withdrawals: { account: string; amount: number }[];
+  // The four components the engine sums into row.taxes. `ordinary` and
+  // `dividends` are RATE buckets, not source buckets: the trad-withdrawal
+  // gross-up tax and the RMD tax are both taxed at the ordinary rate, so
+  // they're folded into `ordinary` alongside the working-years ordinary
+  // income tax; the taxable-account withdrawal's basis-proportional gains
+  // tax is taxed at the SAME cap_gains_tax rate as the dividend tax, so
+  // it's folded into `dividends` (there is no separate capital-gains
+  // bucket in this shape). `cash_interest` and `social_security` are each
+  // exactly one accumulator in the engine. The four always sum to
+  // row.taxes exactly.
+  taxes: { ordinary: number; dividends: number; cash_interest: number; social_security: number };
+}
+
 export interface RunResult {
   rows: YearRow[];
   coast_year: number | null;
+  detail?: YearDetail[];
 }
 
 /**
@@ -192,12 +242,22 @@ export function run(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRa
   return runWithMeta(plan, overrides, rates).rows;
 }
 
-export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?: YearRates[]): RunResult {
+export function runWithMeta(
+  plan: Plan,
+  overrides?: Partial<Assumptions>,
+  rates?: YearRates[],
+  opts?: { detail?: boolean },
+): RunResult {
   plan = normalizePlan(plan);
   let a: Assumptions = plan.assumptions;
   if (overrides) {
     a = { ...a, ...overrides };
   }
+  // 0.6.0: detail is strictly opt-in — when falsy, `details` stays
+  // undefined and every push below is guarded by `wantDetail`, so no
+  // YearDetail object/array is ever allocated.
+  const wantDetail = opts?.detail === true;
+  const details: YearDetail[] | undefined = wantDetail ? [] : undefined;
   // income.end === RETIREMENT tracks the scenario's (possibly overridden)
   // retirement_year rather than a fixed year — resolved here, under
   // EFFECTIVE assumptions, so the rest of run() never sees the sentinel.
@@ -282,6 +342,17 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
       withdrawals: 0.0,
       contributions: 0.0,
     };
+    let yearDetail: YearDetail | undefined;
+    if (wantDetail) {
+      yearDetail = {
+        year: y,
+        incomes: [],
+        expenses: [],
+        contributions: [],
+        withdrawals: [],
+        taxes: { ordinary: 0.0, dividends: 0.0, cash_interest: 0.0, social_security: 0.0 },
+      };
+    }
     const ordRate = a.income_tax + a.local_tax;
 
     // Resolved growth rate per account for this year: the legacy `growth`
@@ -314,6 +385,9 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
         if (i.taxable !== false) {
           taxableGross += amt;
         }
+        if (wantDetail) {
+          yearDetail!.incomes.push({ name: i.name, amount: amt });
+        }
       }
     }
     let ssGross = 0.0;
@@ -327,14 +401,38 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
     // ---------- explicit expenses ----------
     let exp = 0.0;
     const funded529: [string, number][] = [];
+    const funded529Detail: YearDetail["expenses"] | undefined = wantDetail ? [] : undefined;
     plan.expenses.forEach((e, i) => {
       if (e.start <= y && y <= e.end) {
         let amt = e.amount * expGrow[i]!;
         amt *= frac;
         if (e.fund_from) {
           funded529.push([e.fund_from, amt]);
+          if (wantDetail) {
+            // funded_from_account/funded_from_cash_flow are filled in once
+            // the actual split is known, below (this is the SAME object
+            // reference pushed into both arrays).
+            const entry = {
+              name: e.name,
+              amount: amt,
+              fund_from: e.fund_from,
+              funded_from_account: 0,
+              funded_from_cash_flow: 0,
+            };
+            funded529Detail!.push(entry);
+            yearDetail!.expenses.push(entry);
+          }
         } else {
           exp += amt;
+          if (wantDetail) {
+            yearDetail!.expenses.push({
+              name: e.name,
+              amount: amt,
+              fund_from: e.fund_from ?? null,
+              funded_from_account: 0,
+              funded_from_cash_flow: amt,
+            });
+          }
         }
       }
     });
@@ -355,11 +453,19 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
     }
 
     // 529-funded education: drawn from 529s, not household cash flow
-    for (const [name, amt] of funded529) {
+    for (let fi = 0; fi < funded529.length; fi++) {
+      const [name, amt] = funded529[fi]!;
       const take = Math.min(bal[name]!, amt);
       bal[name]! -= take;
       row.withdrawals += take;
-      exp += Math.max(amt - take, 0.0);
+      const fallthrough = Math.max(amt - take, 0.0);
+      exp += fallthrough;
+      if (wantDetail) {
+        const entry = funded529Detail![fi]!;
+        entry.funded_from_account = take;
+        entry.funded_from_cash_flow = fallthrough;
+        yearDetail!.withdrawals.push({ account: name, amount: take });
+      }
     }
 
     // ---------- working years: iterative taxes + cash-flow waterfall ----
@@ -371,6 +477,7 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
     let pretax = 0.0;
     let contribs: Map<string, number> = new Map();
     let matches: Map<string, number> = new Map();
+    let contribsDetail: YearDetail["contributions"] | undefined;
     let taxes: number;
     if (y <= lastWorkYear) {
       for (let iter = 0; iter < 4; iter++) {
@@ -378,6 +485,7 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
         let available = gross - taxes - exp;
         const newContribs: Map<string, number> = new Map();
         const newMatches: Map<string, number> = new Map();
+        const newContribsDetail: YearDetail["contributions"] | undefined = wantDetail ? [] : undefined;
         let newPretax = 0.0;
         for (const c of plan.contributions) {
           if ((c.end === COAST && inCoast) || (c.start === COAST && !inCoast)) {
@@ -416,6 +524,9 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
           const key = c.account;
           newContribs.set(key, (newContribs.get(key) ?? 0.0) + amt);
           newMatches.set(key, (newMatches.get(key) ?? 0.0) + m);
+          if (wantDetail) {
+            newContribsDetail!.push({ account: c.account, name: c.name, amount: amt, match: m });
+          }
           if (c.pretax) {
             newPretax += amt;
           }
@@ -424,13 +535,18 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
           contribs = newContribs;
           matches = newMatches;
           pretax = newPretax;
+          contribsDetail = newContribsDetail;
           break;
         }
         contribs = newContribs;
         matches = newMatches;
         pretax = newPretax;
+        contribsDetail = newContribsDetail;
       }
       taxes = Math.max(taxableGross - pretax, 0.0) * ordRate;
+      if (wantDetail) {
+        yearDetail!.taxes.ordinary += taxes;
+      }
       let contribSum = 0.0;
       for (const v of contribs.values()) {
         contribSum += v;
@@ -446,6 +562,9 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
         }
       }
       row.contributions = contribSum;
+      if (wantDetail) {
+        yearDetail!.contributions = contribsDetail!;
+      }
     } else {
       taxes = 0.0;
     }
@@ -458,14 +577,22 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
       }
     }
     div = div * a.dividend_rate * frac;
-    taxes += div * a.cap_gains_tax;
+    const dividendTax = div * a.cap_gains_tax;
+    taxes += dividendTax;
+    if (wantDetail) {
+      yearDetail!.taxes.dividends += dividendTax;
+    }
 
     // gated cash-interest taxation: pre-growth balance x resolved rate,
     // taxed as ordinary income, in every year (working and retirement) —
     // interest is income the household owes tax on now.
     for (const acc of plan.accounts) {
       if (cashTaxGated(acc, a)) {
-        taxes += bal[acc.name]! * growthRate[acc.name]! * frac * ordRate;
+        const cashInterestTax = bal[acc.name]! * growthRate[acc.name]! * frac * ordRate;
+        taxes += cashInterestTax;
+        if (wantDetail) {
+          yearDetail!.taxes.cash_interest += cashInterestTax;
+        }
       }
     }
 
@@ -474,7 +601,11 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
     if (y > lastWorkYear) {
       for (const ss of plan.social_security) {
         if (y >= ss.claim_year) {
-          taxes += ss.pia_monthly * 12 * (ss.haircut ?? 1.0) * f * (ss.taxable_fraction ?? 0.85) * ordRate;
+          const ssTax = ss.pia_monthly * 12 * (ss.haircut ?? 1.0) * f * (ss.taxable_fraction ?? 0.85) * ordRate;
+          taxes += ssTax;
+          if (wantDetail) {
+            yearDetail!.taxes.social_security += ssTax;
+          }
         }
       }
       const need = exp + taxes - row.income;
@@ -497,18 +628,32 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
           const take = Math.min(bal[acc.name]!, remaining);
           let extra = 0.0;
           if (tt === "trad") {
+            // Ordinary-rate gross-up on a trad withdrawal — IS ordinary
+            // income tax, so it's folded into the `ordinary` bucket.
             extra = take * ordRate;
             tradTaken += take;
+            if (wantDetail) {
+              yearDetail!.taxes.ordinary += extra;
+            }
           } else if (tt === "taxable") {
             const gain = Math.max(1 - basis[acc.name]! / bal[acc.name]!, 0.0);
+            // Basis-proportional gains on a taxable withdrawal, taxed at
+            // cap_gains_tax — the SAME rate as the dividend tax, so it's
+            // folded into the `dividends` bucket (see YearDetail.taxes doc).
             extra = take * gain * a.cap_gains_tax;
             basis[acc.name]! *= 1 - take / bal[acc.name]!;
+            if (wantDetail) {
+              yearDetail!.taxes.dividends += extra;
+            }
           }
           bal[acc.name]! -= take;
           remaining -= take;
           remaining += extra;
           taxes += extra;
           row.withdrawals += take;
+          if (wantDetail) {
+            yearDetail!.withdrawals.push({ account: acc.name, amount: take });
+          }
         }
       }
     }
@@ -530,8 +675,15 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
           const take = Math.min(bal[acc.name]!, forced);
           bal[acc.name]! -= take;
           forced -= take;
-          taxes += take * ordRate;
+          // RMD tax is ordinary-income tax — folded into the `ordinary`
+          // bucket (see YearDetail.taxes doc).
+          const rmdTax = take * ordRate;
+          taxes += rmdTax;
           row.withdrawals += take;
+          if (wantDetail) {
+            yearDetail!.taxes.ordinary += rmdTax;
+            yearDetail!.withdrawals.push({ account: acc.name, amount: take });
+          }
           // after-tax RMD excess: spent (cashFlowDefault)
         }
       }
@@ -562,6 +714,9 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
     row.net_worth = liquid + il529 + hv2 - mortBal;
     row.earmarked_net_worth = earmarked;
     rows.push(row);
+    if (wantDetail) {
+      details!.push(yearDetail!);
+    }
 
     // True-CoastFIRE expectations test (replaces the old trailing-spend x
     // coast_multiple heuristic): deterministic rates always, even under an
@@ -581,5 +736,5 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
     }
   }
 
-  return { rows, coast_year: coastYear };
+  return { rows, coast_year: coastYear, detail: details };
 }
