@@ -53,15 +53,6 @@ export interface Income {
   end: number; // inclusive last year
   taxable?: boolean;
   reduces_by_pretax?: boolean; // 401k/HSA deducted from this stream
-  // 0.6.0: `amount` is TAKE-HOME (after ordinary tax), not gross. The engine
-  // grosses it up inside the tax<->pretax convergence loop so the reported
-  // gross correctly funds pretax contribution rungs while still landing on
-  // the stated take-home after tax. Always taxable (planjson rejects
-  // net:true paired with taxable:false — "net" implies taxed-then-handed-
-  // over, so there's no such thing as untaxed net income). Not defaulted by
-  // normalizePlan — absent stays absent, so legacy plans' dumpPlan output
-  // is unaffected; only `i.net === true` is ever truthy-tested.
-  net?: boolean;
 }
 
 export interface SocialSecurity {

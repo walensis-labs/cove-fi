@@ -142,10 +142,6 @@ export function planFromJson(data: unknown): Plan {
     if (raw.taxable != null && !isBool(raw.taxable)) issues.push(`${label}.taxable must be a boolean`);
     if (raw.reduces_by_pretax != null && !isBool(raw.reduces_by_pretax))
       issues.push(`${label}.reduces_by_pretax must be a boolean`);
-    if (raw.net != null && !isBool(raw.net)) issues.push(`${label}.net must be a boolean`);
-    if (raw.net === true && raw.taxable === false) {
-      issues.push(`${label}: net income cannot set taxable:false — net income is always taxable (that's what "net" means)`);
-    }
   });
 
   // ---------- social_security ----------
