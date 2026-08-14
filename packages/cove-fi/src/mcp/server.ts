@@ -11,11 +11,14 @@
  */
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { RegisteredTool, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { AnySchema, ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { CITED_DEFAULTS } from "../defaults.js";
 import { type YearRow } from "../engine.js";
+import { METRIC_DEFINITIONS, METRICS_VERSION } from "../metrics.js";
 import { type Assumptions, DEFAULT_ASSUMPTIONS, type TaxType } from "../model.js";
 import { isValidRet, RET_MAX, RET_MIN } from "../planjson.js";
 import { listPlans, resolvePlanRef } from "../planstore.js";
@@ -251,7 +254,33 @@ const PACKAGE_VERSION: string = readPackageVersion();
 export function createServer(session: Session): McpServer {
   const server = new McpServer({ name: "cove-fi", version: PACKAGE_VERSION });
 
-  server.registerTool(
+  // Capabilities for get_engine_info are collected here, not hand-listed:
+  // every tool below is registered through this local wrapper (instead of
+  // calling server.registerTool directly), so `toolNames` can never drift
+  // from what's actually reachable on this server instance. Scoped per
+  // createServer() call (not module-level) so repeated server instances in
+  // tests don't accumulate stale names across instances.
+  const toolNames: string[] = [];
+  function registerTool<
+    OutputArgs extends ZodRawShapeCompat | AnySchema,
+    InputArgs extends undefined | ZodRawShapeCompat | AnySchema = undefined,
+  >(
+    name: string,
+    config: {
+      title?: string;
+      description?: string;
+      inputSchema?: InputArgs;
+      outputSchema?: OutputArgs;
+      annotations?: ToolAnnotations;
+      _meta?: Record<string, unknown>;
+    },
+    handler: ToolCallback<InputArgs>,
+  ): RegisteredTool {
+    toolNames.push(name);
+    return server.registerTool(name, config, handler);
+  }
+
+  registerTool(
     "load_plan",
     {
       description:
@@ -266,7 +295,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "list_plans",
     {
       description:
@@ -283,7 +312,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "create_plan",
     {
       description:
@@ -293,7 +322,7 @@ export function createServer(session: Session): McpServer {
     ({ plan }) => guarded(() => session.createPlan(plan)),
   );
 
-  server.registerTool(
+  registerTool(
     "update_plan",
     {
       description:
@@ -312,7 +341,7 @@ export function createServer(session: Session): McpServer {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "save_plan",
     {
       description: "Persist the session's current plan to the plan store under `name`.",
@@ -325,7 +354,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "get_assumptions",
     {
       description:
@@ -339,7 +368,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "set_assumption",
     {
       description:
@@ -365,7 +394,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "run_projection",
     {
       description: "Run the base plan or a named scenario; returns a thinned, rounded year-by-year projection.",
@@ -379,20 +408,21 @@ export function createServer(session: Session): McpServer {
           rows: thinRows(rows, fi.retirement_year).map(roundRow),
           todays: thinRows(todays, fi.retirement_year).map(roundRow),
           fi,
+          metrics_version: METRICS_VERSION,
         };
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "fi_status",
     {
       description: "Return FI/coast/depletion year status for the base plan or a named scenario.",
       inputSchema: { scenario: z.string().optional() },
     },
-    ({ scenario }) => guarded(() => roundFiStatus(session.fiStatus(scenario))),
+    ({ scenario }) => guarded(() => ({ ...roundFiStatus(session.fiStatus(scenario)), metrics_version: METRICS_VERSION })),
   );
 
-  server.registerTool(
+  registerTool(
     "run_scenario",
     {
       description:
@@ -422,7 +452,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "monte_carlo",
     {
       description:
@@ -441,7 +471,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "compare_scenarios",
     {
       description: "Compare previously-defined scenarios by name against the first as baseline.",
@@ -470,7 +500,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "seed_from_ynab",
     {
       description:
@@ -487,7 +517,7 @@ export function createServer(session: Session): McpServer {
     ({ budget_id }) => guarded(() => seedFromYnab(budget_id === undefined ? undefined : { budgetId: budget_id })),
   );
 
-  server.registerTool(
+  registerTool(
     "income_gross_from_net",
     {
       description:
@@ -547,6 +577,28 @@ export function createServer(session: Session): McpServer {
         }
         return result;
       }),
+  );
+
+  registerTool(
+    "get_engine_info",
+    {
+      description:
+        "Handshake tool: reports the running server's version, metrics_version, the live " +
+        "run_scenario override key list, metric definitions, and every registered tool name " +
+        "(capabilities). Call this first in a new session — no plan needs to be loaded — to " +
+        "detect a stale or partial deploy before trusting any other tool's numbers, and to " +
+        "check metrics_version whenever a cached metric value (e.g. coast_year) needs to be " +
+        "revalidated against its current definition.",
+      inputSchema: {},
+    },
+    () =>
+      guarded(() => ({
+        version: PACKAGE_VERSION,
+        metrics_version: METRICS_VERSION,
+        scenario_override_keys: SCENARIO_OVERRIDE_KEYS,
+        metric_definitions: METRIC_DEFINITIONS,
+        capabilities: [...toolNames],
+      })),
   );
 
   server.registerPrompt(
