@@ -62,6 +62,7 @@ const DOLLAR_ROW_KEYS = [
   "taxes",
   "withdrawals",
   "contributions",
+  "earmarked_net_worth",
 ] as const satisfies readonly (keyof YearRow)[];
 
 function roundRow(row: YearRow): YearRow {
@@ -76,6 +77,8 @@ function roundFiStatus(fi: FiStatus): FiStatus {
     terminal_net_worth: Math.round(fi.terminal_net_worth),
     terminal_net_worth_todays: Math.round(fi.terminal_net_worth_todays),
     coast_target_at_retirement: Math.round(fi.coast_target_at_retirement),
+    terminal_earmarked_net_worth: Math.round(fi.terminal_earmarked_net_worth),
+    terminal_earmarked_net_worth_todays: Math.round(fi.terminal_earmarked_net_worth_todays),
   };
 }
 
@@ -108,12 +111,21 @@ const ASSUMPTION_CITATIONS: Record<string, string> = {
   "class_returns.cash": "HYSA/T-bill nominal yield assumption; falls back to ret when unset",
 };
 
-// Explicit shapes (not a z.record(z.unknown()) passthrough): the engine
-// has no validation of its own for extra_expenses/extra_incomes — a
-// missing `amount` becomes `undefined * x = NaN`, which then poisons
-// every subsequent year's balances silently. Zod must reject a malformed
-// entry at the protocol boundary, before it ever reaches Session/engine.
-const extraExpenseShape = z.object({
+// Explicit shapes (not a bare z.record(z.unknown()) passthrough): the
+// engine has no validation of its own for extra_expenses/extra_incomes — a
+// missing `amount` becomes `undefined * x = NaN`, which then poisons every
+// subsequent year's balances silently. Zod must reject a malformed entry
+// at the protocol boundary, before it ever reaches Session/engine.
+//
+// Each shape below is registered against the MCP SDK as `.catchall(z.unknown())`
+// (permissive), never `.strict()` — see the long comment above
+// `scenarioOverridesShape` for why: the SDK's own schema-validation layer
+// runs *before* our tool handler and would otherwise silently strip (or,
+// with `.strict()`, opaquely reject with no supported-key list) any typo'd
+// field before we ever see it. The matching `*Strict` sibling is used only
+// for the handler-side re-check in run_scenario, where we control the
+// error message.
+const extraExpenseFields = {
   name: z.string(),
   amount: z.number(),
   start: z.number().int(),
@@ -121,16 +133,20 @@ const extraExpenseShape = z.object({
   growth_over_inflation: z.number().optional(),
   nominal_at_start: z.boolean().optional(),
   fund_from: z.string().optional(),
-});
+};
+const extraExpenseShape = z.object(extraExpenseFields).catchall(z.unknown());
+const extraExpenseStrict = z.object(extraExpenseFields).strict();
 
-const extraIncomeShape = z.object({
+const extraIncomeFields = {
   name: z.string(),
   amount: z.number(),
   start: z.number().int(),
   end: z.number().int(),
   taxable: z.boolean().optional(),
   reduces_by_pretax: z.boolean().optional(),
-});
+};
+const extraIncomeShape = z.object(extraIncomeFields).catchall(z.unknown());
+const extraIncomeStrict = z.object(extraIncomeFields).strict();
 
 // update_plan requires at least one of add/set — expressed as a refine on
 // a standalone object schema (registerTool's inputSchema wants a raw shape,
@@ -147,6 +163,24 @@ const scenarioOverridesShape = {
   inflation: z.number().optional(),
   ret: z.number().optional(),
   savings_rate_multiplier: z.number().optional(),
+  // 0.5.0: per-rung overrides — see applyOverrides (session.ts) for the full
+  // end/keep/scale composition rules. Unlike extra_expenses/extra_incomes
+  // above, there's only ONE variant of this nested schema (not a
+  // catchall/strict pair): it's always `.strict()`, so an unknown key
+  // nested inside `contributions` is rejected by zod itself wherever this
+  // shape is used — at the permissive SDK-boundary schema below (nested
+  // strictness isn't relaxed by the outer object's `.catchall`) and again
+  // at the handler's `scenarioOverridesStrict` re-parse (which spreads this
+  // same shape in below). Because scenarioOverridesStrict spreads
+  // ...scenarioOverridesShape, adding it once here reaches both.
+  contributions: z
+    .object({
+      end: z.number().int().optional(),
+      keep: z.array(z.string()).optional(),
+      scale: z.number().min(0).optional(),
+    })
+    .strict()
+    .optional(),
   ss_haircut: z.number().optional(),
   ss_claim_year: z.number().optional(),
   extra_expenses: z.array(extraExpenseShape).optional(),
@@ -157,6 +191,43 @@ const scenarioOverridesShape = {
   // every account, so this override has no effect there.
   class_returns: z.record(z.enum(CLASS_RETURN_TAX_TYPES), z.number().min(RET_MIN).max(RET_MAX)).optional(),
 };
+
+// Single source of truth for the supported top-level `run_scenario`
+// override keys, used both to build the strict re-check schema below and
+// to name the supported set in its error text — Task 5 (or any future
+// change) that extends scenarioOverridesShape keeps this in sync
+// automatically instead of drifting out of a hand-maintained list.
+export const SCENARIO_OVERRIDE_KEYS = Object.keys(scenarioOverridesShape);
+
+// Why two schemas for one field: the MCP SDK parses `run_scenario`'s
+// `overrides` argument against whatever we register as its inputSchema
+// *before* our tool handler ever runs (confirmed by probing the installed
+// SDK — @modelcontextprotocol/sdk@1.30.0's McpServer.validateToolInput
+// throws a McpError from the request handler, which is caught and turned
+// into an isError CallToolResult by the SDK itself; our handler's `guarded`
+// wrapper never gets a chance to run, so it cannot rewrite that message).
+// A plain (non-strict) z.object silently *strips* unrecognized keys before
+// that point — the original bug: a typo'd override key vanishes and the
+// scenario silently runs as an unmodified copy of the base plan. Zod's
+// `.strict()` fixes the silent-strip but the SDK surfaces its raw
+// "Unrecognized key(s)..." message with no way to append the supported-key
+// list (`.strict(message)` only accepts a *static* string, which can't
+// name the actual offending key alongside it).
+//
+// So: the schema registered with the SDK (`scenarioOverridesShape` wrapped
+// in `.catchall(z.unknown())` at the registerTool call below) is
+// deliberately permissive — known fields keep their real per-field
+// validation, but unknown keys pass through untouched instead of being
+// stripped. The handler then re-validates the untouched object against
+// this strict sibling and throws its own Error (caught by `guarded`) with
+// a message naming both the offending key(s) and SCENARIO_OVERRIDE_KEYS.
+const scenarioOverridesStrict = z
+  .object({
+    ...scenarioOverridesShape,
+    extra_expenses: z.array(extraExpenseStrict).optional(),
+    extra_incomes: z.array(extraIncomeStrict).optional(),
+  })
+  .strict();
 
 // ---------------------------------------------------------------------
 // server
@@ -216,7 +287,7 @@ export function createServer(session: Session): McpServer {
     "create_plan",
     {
       description:
-        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars). Growth overrides: an account's `ret` and `assumptions.class_returns.<tax-class>` (both finite, in [-0.5, 0.5]) let you set nominal return by account or by tax class, falling back to `assumptions.ret` when unset.",
+        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars). Growth overrides: an account's `ret` and `assumptions.class_returns.<tax-class>` (both finite, in [-0.5, 0.5]) let you set nominal return by account or by tax class, falling back to `assumptions.ret` when unset. A contribution's `name` (unique among named rungs) lets `run_scenario`'s `overrides.contributions.keep` target it by name, and its `hard_end` caps it at a plain calendar year independent of `end`. An account's `earmarked: true` (implies `liquid: false`) excludes its balance from `net_worth`/the retirement drawdown waterfall and reports it separately as `earmarked_net_worth`.",
       inputSchema: { plan: z.record(z.unknown()) },
     },
     ({ plan }) => guarded(() => session.createPlan(plan)),
@@ -226,7 +297,7 @@ export function createServer(session: Session): McpServer {
     "update_plan",
     {
       description:
-        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions` — note `set.assumptions.class_returns`, being one key of that shallow merge, is replaced WHOLESALE, not merged per tax-class). At least one of `add`/`set` is required (amounts are annual, today's dollars).",
+        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions` — note `set.assumptions.class_returns`, being one key of that shallow merge, is replaced WHOLESALE, not merged per tax-class). At least one of `add`/`set` is required (amounts are annual, today's dollars). Appended contributions may carry `name` (unique among named rungs — targetable by `run_scenario`'s `overrides.contributions.keep`) and `hard_end` (a plain calendar year cap independent of `end`); appended accounts may carry `earmarked: true` to exclude the balance from `net_worth` and report it under `earmarked_net_worth` instead.",
       inputSchema: {
         add: z.record(z.unknown()).optional(),
         set: z.record(z.unknown()).optional(),
@@ -328,12 +399,25 @@ export function createServer(session: Session): McpServer {
         "Define a named scenario from override deltas and return its FI status. `overrides.class_returns` " +
         "replaces assumptions.class_returns WHOLESALE (not a per-key merge) and only affects deterministic " +
         "projections (run_projection/fi_status/compare_scenarios) — monte_carlo ignores invested return " +
-        "overrides (its rates schedule dominates ret/class_returns for every account).",
-      inputSchema: { name: z.string(), overrides: z.object(scenarioOverridesShape) },
+        "overrides (its rates schedule dominates ret/class_returns for every account). " +
+        "`overrides.contributions` {end, keep, scale} tunes contribution rungs AFTER " +
+        "savings_rate_multiplier (the two compose): `end` (a year) clamps every non-kept rung's " +
+        "hard_end — it can only pull the cutoff earlier, never extend it past a rung's own end; " +
+        "`keep` (rung names) exempts those rungs from this override's own scale/end (savings_rate_multiplier " +
+        "still applies to kept rungs); `scale` multiplies every non-kept rung's amount/pct/limit.",
+      // Permissive on purpose — see the comment above scenarioOverridesStrict.
+      inputSchema: { name: z.string(), overrides: z.object(scenarioOverridesShape).catchall(z.unknown()) },
     },
     ({ name, overrides }) =>
       guarded(() => {
-        session.defineScenario(name, overrides);
+        const parsed = scenarioOverridesStrict.safeParse(overrides);
+        if (!parsed.success) {
+          const detail = parsed.error.issues
+            .map((i) => (i.path.length ? `${i.message} at ${i.path.join(".")}` : i.message))
+            .join("; ");
+          throw new Error(`${detail}. Supported top-level keys: ${SCENARIO_OVERRIDE_KEYS.join(", ")}`);
+        }
+        session.defineScenario(name, parsed.data);
         return { name, fi: roundFiStatus(session.fiStatus(name)) };
       }),
   );

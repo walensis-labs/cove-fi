@@ -22,7 +22,18 @@
  * `to_limit` rung has no scalar to scale, so it is converted into a fixed
  * `amount = IRS_LIMITS_2026[annual_limit_key] * multiplier` (still in 2026
  * dollars — the engine inflates it like any other `amount` rung) with
- * `to_limit` dropped to `false`. `ss_haircut`/`ss_claim_year` overwrite
+ * `to_limit` dropped to `false`. `contributions` {end, keep, scale} applies
+ * AFTER `savings_rate_multiplier` (so the two COMPOSE — a rung can be
+ * scaled by both in sequence): `keep` is resolved first — every name must
+ * match a currently-named rung or the call throws, listing the unknown
+ * names (unnamed rungs can never be kept) — then kept rungs are excluded
+ * byte-for-byte from both `scale` and `end`; `scale` (>= 0) multiplies
+ * every non-kept rung's `amount`/`pct_of_income` and converts a `to_limit`
+ * rung the same way `savings_rate_multiplier` does above; `end` (a finite
+ * integer year) tightens every non-kept rung's `hard_end` to
+ * `min(existing hard_end ?? Infinity, end)` — it can only pull a cutoff
+ * earlier, never push it later (the rung's own `end` still governs if it's
+ * earlier still). `ss_haircut`/`ss_claim_year` overwrite
  * those fields on every `SocialSecurity` entry. `extra_expenses` and
  * `extra_incomes` append to the plan's existing lists. Any income whose
  * `end` is the `RETIREMENT` sentinel follows `retirement_year` for free —
@@ -31,7 +42,15 @@
  */
 import { readFileSync } from "node:fs";
 import { coastTargetAtRetirement, run, runWithMeta, type YearRow } from "./engine.js";
-import { type Assumptions, type ClassReturns, type Expense, type Income, IRS_LIMITS_2026, type Plan } from "./model.js";
+import {
+  type Assumptions,
+  type ClassReturns,
+  type Contribution,
+  type Expense,
+  type Income,
+  IRS_LIMITS_2026,
+  type Plan,
+} from "./model.js";
 import { runMonteCarlo, type MonteCarloResult } from "./montecarlo.js";
 import { loadPlan } from "./planfile.js";
 import { planFromJson } from "./planjson.js";
@@ -42,6 +61,10 @@ export interface ScenarioOverrides {
   inflation?: number;
   ret?: number;
   savings_rate_multiplier?: number; // scales every Contribution amount/pct/limit-want
+  // 0.5.0: per-rung overrides — see applyOverrides' doc comment above for
+  // the full keep/scale/end semantics and their composition with
+  // savings_rate_multiplier.
+  contributions?: { end?: number; keep?: string[]; scale?: number };
   ss_haircut?: number;
   ss_claim_year?: number;
   extra_expenses?: Expense[];
@@ -61,6 +84,11 @@ export interface FiStatus {
   depletion_year: number | null;
   terminal_net_worth: number;
   terminal_net_worth_todays: number;
+  // 0.5.0: last row's earmarked_net_worth (engine.YearRow) and its
+  // today's-$ equivalent — same last-row + deflator pattern as
+  // terminal_net_worth/terminal_net_worth_todays above.
+  terminal_earmarked_net_worth: number;
+  terminal_earmarked_net_worth_todays: number;
   retirement_year: number;
 }
 
@@ -90,6 +118,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 const DOLLAR_METRICS = [
   "net_worth",
   "liquid_net_worth",
+  "earmarked_net_worth",
   "income",
   "expenses",
   "taxes",
@@ -126,6 +155,52 @@ export function applyOverrides(plan: Plan, o: ScenarioOverrides): Plan {
         amount: c.amount != null ? c.amount * m : c.amount,
         pct_of_income: c.pct_of_income != null ? c.pct_of_income * m : c.pct_of_income,
       };
+    });
+  }
+
+  if (o.contributions !== undefined) {
+    const { end, keep, scale } = o.contributions;
+
+    if (keep !== undefined && (!Array.isArray(keep) || keep.some((k) => typeof k !== "string"))) {
+      throw new Error("applyOverrides: contributions.keep must be an array of strings");
+    }
+    if (scale !== undefined && !(Number.isFinite(scale) && scale >= 0)) {
+      throw new Error("applyOverrides: contributions.scale must be a finite number >= 0");
+    }
+    if (end !== undefined && !(Number.isFinite(end) && Number.isInteger(end))) {
+      throw new Error("applyOverrides: contributions.end must be a finite integer year");
+    }
+
+    const keepSet = new Set(keep ?? []);
+    if (keepSet.size > 0) {
+      const namedRungs = new Set(copy.contributions.filter((c) => c.name != null).map((c) => c.name!));
+      const unknown = [...keepSet].filter((k) => !namedRungs.has(k));
+      if (unknown.length > 0) {
+        throw new Error(
+          `applyOverrides: contributions.keep names not found among named rungs (unnamed rungs can never be kept): ${unknown.join(", ")}`,
+        );
+      }
+    }
+
+    copy.contributions = copy.contributions.map((c): Contribution => {
+      if (c.name != null && keepSet.has(c.name)) return c; // kept: byte-untouched
+
+      let next = c;
+      if (scale !== undefined) {
+        if (next.to_limit && next.annual_limit_key) {
+          next = { ...next, to_limit: false, amount: IRS_LIMITS_2026[next.annual_limit_key] * scale };
+        } else {
+          next = {
+            ...next,
+            amount: next.amount != null ? next.amount * scale : next.amount,
+            pct_of_income: next.pct_of_income != null ? next.pct_of_income * scale : next.pct_of_income,
+          };
+        }
+      }
+      if (end !== undefined) {
+        next = { ...next, hard_end: Math.min(next.hard_end ?? Number.POSITIVE_INFINITY, end) };
+      }
+      return next;
     });
   }
 
@@ -182,6 +257,8 @@ function computeFiStatus(rows: YearRow[], a: Assumptions, coastYear: number | nu
     depletion_year: computeDepletionYear(rows, a.retirement_year),
     terminal_net_worth: last.net_worth,
     terminal_net_worth_todays: last.net_worth / factor,
+    terminal_earmarked_net_worth: last.earmarked_net_worth,
+    terminal_earmarked_net_worth_todays: last.earmarked_net_worth / factor,
     retirement_year: a.retirement_year,
   };
 }

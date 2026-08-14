@@ -75,6 +75,18 @@ expectations test — does each account's current balance, grown at its own
 rate to `retirement_year`, already clear `fi_multiple x` projected
 retirement spending — rather than a trailing-spend heuristic.
 
+As of 0.5, unknown scenario override keys are a validation error instead
+of a silent no-op (a typo used to run silently as an unmodified base
+plan — see `docs/SEMANTICS.md`'s Scenario overrides section if you were
+relying on one before this release), and contribution rungs can be named
+so a scenario can stop, scale, or exempt them individually — `--contributions-end
+2043 --contributions-keep hsa,match` clamps every other rung's cutoff to
+2043 while leaving the HSA and employer-match rungs untouched. Accounts can
+also be flagged `earmarked: true` (a house fund, an education fund) to pull
+their balance out of `net_worth`, FI/coast/depletion, and the retirement
+drawdown entirely — reported separately as `earmarked_net_worth` — while
+still being spendable for their actual purpose via an expense's `fund_from`.
+
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
@@ -82,7 +94,9 @@ retirement spending — rather than a trailing-spend heuristic.
   propose-only YNAB seeding). **Shipped.**
 - **0.4** — per-account/per-tax-class return overrides, gated
   cash-interest taxation, correlated T-bill Monte Carlo cash sleeves, true
-  CoastFIRE `coast_year`. **This release.**
+  CoastFIRE `coast_year`. **Shipped.**
+- **0.5** — strict scenario override validation, named contribution rungs
+  with stop/scale/keep overrides, earmarked assets. **This release.**
 - **Next** — integrations (third-party import/export), bond
   series/portfolio mixes
 

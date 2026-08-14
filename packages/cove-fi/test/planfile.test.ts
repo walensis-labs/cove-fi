@@ -34,4 +34,36 @@ describe("planfile", () => {
     p.expenses[0]!.end = RETIREMENT;
     expect(() => loadPlan(dumpPlan(p))).toThrowError(/RETIREMENT/);
   });
+
+  // 0.5.0: Contribution.name/hard_end and Account.earmarked are additive
+  // fields — verify TOML round-trips them rather than assuming smol-toml's
+  // generic object handling does the right thing.
+  it("Contribution.name and hard_end round-trip through TOML", () => {
+    const p = syntheticPlan();
+    p.contributions[0]!.name = "match-401k";
+    p.contributions[0]!.hard_end = 2060;
+    const loaded = loadPlan(dumpPlan(p));
+    expect(loaded.contributions[0]!.name).toBe("match-401k");
+    expect(loaded.contributions[0]!.hard_end).toBe(2060);
+  });
+
+  it("Contribution.name/hard_end absent on other rungs stay absent after round-trip", () => {
+    const p = syntheticPlan();
+    p.contributions[0]!.name = "match-401k";
+    const loaded = loadPlan(dumpPlan(p));
+    expect(loaded.contributions[1]!.name).toBeUndefined();
+    expect(loaded.contributions[1]!.hard_end).toBeUndefined();
+  });
+
+  it("Account.earmarked round-trips through TOML", () => {
+    const p = syntheticPlan();
+    // college529 is already liquid:false in the synthetic fixture, so
+    // marking it earmarked can't trip the earmarked+liquid:true rejection.
+    const idx = p.accounts.findIndex((a) => a.name === "college529");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    p.accounts[idx]!.earmarked = true;
+    const loaded = loadPlan(dumpPlan(p));
+    expect(loaded.accounts[idx]!.earmarked).toBe(true);
+    expect(loaded.accounts[idx]!.liquid).toBe(false);
+  });
 });

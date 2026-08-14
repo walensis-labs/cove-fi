@@ -41,6 +41,43 @@ negative — the engine does not reach into an account to cover it. See
 `docs/VALIDATION.md`'s Known Limitations for the bound this is held to in
 tests.
 
+### Named rungs and `hard_end`
+
+As of 0.5.0, a `Contribution` may carry a `name` (unique among every OTHER
+named rung — unnamed rungs never collide, and never being named is fine)
+so `run_scenario`'s `overrides.contributions.keep` can target it by name,
+and a `hard_end` — a plain calendar year that caps the rung independent of
+its own `end`. `hard_end` never accepts the `COAST` (`-1`) or `RETIREMENT`
+(`-2`) sentinels; `planjson` rejects them there with a named issue — those
+sentinels are meaningful on `start`/`end`, not on a fixed cutoff. A rung is
+inactive whenever `y > hard_end`, checked alongside the existing
+`start`/`end`/COAST window logic in the same convergence loop — whichever
+bound stops the rung first governs. This holds even for a COAST-`end` rung
+(`end: -1`) whose trigger hasn't fired yet: an earlier `hard_end` stops it
+regardless of COAST, and — having lost its contributions — a plan can wind
+up never reaching its own coast trigger within the horizon at all. A
+`hard_end` set later than everything else that could stop the rung never
+binds; it's byte-identical to not having set it.
+
+### Pretax-stop cash-flow rule (no engine change — falls out for free)
+
+Deactivating a pretax rung (via `hard_end`, a `contributions.end` scenario
+override — see Scenario overrides below — or the rung simply reaching its
+own `end`) needs no special-case handling: it falls straight out of the
+existing gross-income tax model. One fewer pretax dollar reducing the
+taxable base means ordinary tax on that dollar now applies, so **taxes
+rise by `amount x rate`** (`rate = income_tax + local_tax`); that same
+dollar, no longer diverted into the rung, instead lands in that year's
+spendable surplus via `cashFlowDefault: "spend"`, so **take-home
+(`expenses`, since surplus is spent) rises by `amount x (1 - rate)`**. The
+two together account for the whole stopped amount exactly: `amount x rate
++ amount x (1 - rate) = amount`. Pinned in
+`test/contributions-overrides.test.ts`'s "pretax-stop" block with
+hand-derived numbers (income 100k, a $10,000 pretax rung, `hard_end:
+2027`, `income_tax + local_tax = 0.31`): the year after the rung stops,
+taxes rise +$3,100 (`10,000 x 0.31`) and expenses (surplus) rise +$6,900
+(`10,000 x 0.69`).
+
 ## Nominal internals, today's-dollars at the edges
 
 Every plan amount (income, expense, contribution `amount`) is specified in
@@ -214,6 +251,64 @@ count against this requirement; only the shortfall (`rmd - already
 taken`) is forced. Forced RMD amounts beyond what's needed to cover
 expenses are, like any other surplus, spent rather than reinvested.
 
+## Earmarked assets
+
+As of 0.5.0, `Account.earmarked: true` marks a balance as saved toward a
+specific goal (a house fund, an education fund held outside `tax: "529"`,
+etc.) rather than general-purpose net worth. Setting it forces `liquid:
+false` regardless of what `liquid` says (`normalizePlan`); an EXPLICIT
+`liquid: true` alongside `earmarked: true` is a validation error at the
+planjson boundary — "account X: earmarked accounts cannot be liquid".
+Earmarked implies non-liquid everywhere, no exceptions.
+
+**What's excluded.** An earmarked account's balance is pulled out of
+`net_worth` and reported separately, every year, as
+`YearRow.earmarked_net_worth` (mirrored at the FiStatus level as
+`terminal_earmarked_net_worth`/`terminal_earmarked_net_worth_todays`).
+Because `liquid_net_worth`, the true-CoastFIRE expectations test (FI and
+Coast definitions below), and Monte Carlo's `success_rate` all key off
+`acc.liquid`, an earmarked account is excluded from every one of them too
+— FI year, coast year, depletion year, and MC success rate all skip it.
+The discretionary retirement drawdown waterfall (`taxable -> hsa -> trad
+-> roth -> cash`) skips it as well, via an explicit `if (acc.earmarked)
+continue;` guard in the drawdown loop — it is never automatically raided
+to cover a cash-flow gap. Inflating an earmarked balance 100x moves
+nothing but `earmarked_net_worth` — pinned as an exclusion test in
+`test/earmarked.test.ts`.
+
+A legacy `liquid: false` account WITHOUT `earmarked` (e.g. a `tax: "529"`
+account predating 0.5.0) is unaffected by any of this — it stays inside
+`net_worth` exactly as before, in the same `il529` bucket the engine has
+always kept separate from `liquid`.
+
+**`fund_from` is the drawdown mechanism.** Being excluded from the
+discretionary waterfall doesn't mean an earmarked account's money is
+unreachable — an `Expense` with `fund_from` set to the account's name
+draws directly from it (`take = min(bal[fund_from], amt)`), independent of
+`retirement_year` or working-year status, exactly like the existing
+529-funded-education path this reuses. This is the intended way to
+actually spend earmarked money: attach the goal's expense to the account
+via `fund_from` rather than relying on the general drawdown to find it —
+it deliberately won't.
+
+**Pathological note: earmarked + `rmd`.** RMDs are legally forced and are
+NOT gated by `earmarked` — an account flagged both `rmd: true` and
+`earmarked: true` still has its Required Minimum Distribution taken every
+year once its owner turns 73 (see RMDs above), same as any other `rmd`
+account. This is a genuinely pathological combination — an account
+earmarked for one purpose, drained by law regardless of that purpose —
+and the fix is to avoid it: don't flag `rmd` accounts as `earmarked`.
+
+**Open product call: dividends are still taxed.** The dividend-tax
+computation (dividends on `tax: "taxable"` balances, qualified, taxed at
+`cap_gains_tax`) sums every taxable account's balance regardless of
+`earmarked` — an earmarked TAXABLE account's dividends are still taxed to
+the household every year, exactly like an ordinary taxable account. This
+is current, deliberate behavior (the household still legally owns the
+account, whatever the money is earmarked for) but it's a live product
+question, not a fully settled one, and may be revisited in a future
+release.
+
 ## FI and Coast definitions
 
 **FI year** (`fi_status`'s `fi_year`, `FiStatus` in `session.ts`): the
@@ -298,6 +393,76 @@ rungs).
   to `retirement_year - 1`. A `--retirement-year` scenario override moves
   this income's end date automatically; the rest of `run()` never sees the
   sentinel.
+
+## Scenario overrides
+
+`run_scenario` (MCP), the CLI's `scenario` command, and `compare` all turn
+a base `Plan` into a modified one through one code path — `applyOverrides`
+(`session.ts`) — that is pure (never mutates its input `Plan` or the
+override object) and, for the `contributions` override specifically,
+atomic: a thrown validation error leaves the session's current plan
+untouched.
+
+**Strict validation (0.5.0 bug fix).** The MCP boundary is `.strict()`: an
+unrecognized top-level key, or an unrecognized key nested inside
+`contributions`, is a validation ERROR naming the offending key(s) and the
+full supported set (`SCENARIO_OVERRIDE_KEYS`, `mcp/server.ts`) — not a
+silent no-op. **Before 0.5.0, an unknown key was silently stripped** by a
+permissive `z.object`, and the scenario ran to completion as an
+unmodified copy of the base plan with no error — a typo'd override key
+(e.g. `contributions_end` instead of `contributions.end`) looked like it
+worked. Re-run any scenario you were trusting before this release.
+
+The supported top-level keys are:
+
+- **`retirement_year`** (number) — overwrites `assumptions.retirement_year`.
+  Any `Income` whose `end` is the `RETIREMENT` sentinel follows it for
+  free (see Sentinels above).
+- **`inflation`** (number) — overwrites `assumptions.inflation`. Ignored
+  under Monte Carlo (see Monte Carlo below).
+- **`ret`** (number) — overwrites `assumptions.ret`, the global-default
+  rung of the Return model's precedence chain. Ignored under Monte Carlo
+  and, deterministically, for any account whose own `growth`/`ret` or
+  whose tax class's `class_returns` entry outranks the global default.
+- **`class_returns`** (per-tax-class map) — REPLACES
+  `assumptions.class_returns` wholesale, not a per-key merge. Deterministic
+  runs only — Monte Carlo's rates schedule dominates `ret`/`class_returns`
+  for every account, cash included.
+- **`savings_rate_multiplier`** (number) — a blanket knob that predates
+  `contributions`: scales EVERY rung's `amount`/`pct_of_income` by the
+  multiplier (a `to_limit` rung converts to a fixed `amount =
+  IRS_LIMITS_2026[key] x multiplier`, dropping `to_limit`), no exceptions
+  — it is not scoped by `contributions.keep` (see below).
+- **`contributions`** (`{ end?, keep?, scale? }`, 0.5.0) — per-rung
+  overrides; see its own subsection immediately below.
+- **`ss_haircut`** / **`ss_claim_year`** (number) — overwrite the matching
+  field on EVERY `SocialSecurity` entry in the plan.
+- **`extra_expenses`** / **`extra_incomes`** (arrays) — APPEND to the
+  plan's existing `expenses`/`incomes` lists; they do not replace anything.
+
+### `contributions` {end, keep, scale}
+
+Applies AFTER `savings_rate_multiplier` inside `applyOverrides` — the two
+COMPOSE, a rung can be touched by both in sequence (multiplier first,
+`contributions.scale` second: e.g. multiplier `0.5` then scale `0.5`
+leaves a non-kept rung's amount at 0.25x). Resolution order:
+
+1. **`keep`** (an array of rung names) resolves first. Every name must
+   match a currently-named rung or the call throws, listing the unknown
+   names — unnamed rungs can never be kept. Kept rungs are excluded
+   byte-for-byte from THIS override's own `scale`/`end` — but
+   `savings_rate_multiplier` still touches them, since it's a blanket
+   knob that predates `keep`. This is a deliberate scoping ruling on a
+   spec-silent fork, not an oversight: **`keep` exempts a rung from
+   `contributions.scale`/`.end` only.**
+2. **`scale`** (a finite number `>= 0`) multiplies every non-kept rung's
+   `amount`/`pct_of_income`, converting a `to_limit` rung to a fixed
+   amount the same way `savings_rate_multiplier` does above.
+3. **`end`** (a finite integer year) tightens every non-kept rung's
+   `hard_end` to `min(existing hard_end ?? Infinity, end)` — it can only
+   pull a cutoff EARLIER, never push it later; the rung's own `end` (or
+   COAST trigger) still governs if that lands earlier still. **End clamps
+   never extend** — here or anywhere else `hard_end` is set.
 
 ## Monte Carlo
 

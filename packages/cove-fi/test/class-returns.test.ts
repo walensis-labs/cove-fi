@@ -11,7 +11,13 @@ const golden = (f: string) =>
 describe("golden backward compatibility", () => {
   it("plans without new fields are byte-identical to 0.3.0", () => {
     const rows = run(planFromJson(golden("golden-plan.json")));
-    expect(rows).toEqual(golden("golden-rows.json"));  // exact, not toBeCloseTo
+    const goldenRows = golden("golden-rows.json");
+    // 0.5.0: YearRow gained additive fields; the 0.3.0 golden pins the
+    // original eight exactly — fixture files unchanged since capture.
+    const METRICS = ["year","net_worth","liquid_net_worth","income","expenses","taxes","withdrawals","contributions"] as const;
+    expect(rows.length).toBe(goldenRows.length);
+    rows.forEach((r, i) => { for (const k of METRICS)
+      expect(r[k], `row ${i} ${k}`).toEqual(goldenRows[i][k]); });
   });
 });
 

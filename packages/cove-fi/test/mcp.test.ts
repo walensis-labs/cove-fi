@@ -216,4 +216,38 @@ describe("mcp server", () => {
     const r = await client.callTool({ name: "monte_carlo", arguments: { scenario: "does-not-exist" } });
     expect(r.isError).toBe(true);
   });
+
+  it("run_projection rows/todays carry a rounded earmarked_net_worth field", async () => {
+    await call("load_plan", { path: planPath });
+    const proj = await call("run_projection");
+    expect(proj.rows.length).toBeGreaterThan(0);
+    for (const row of [...proj.rows, ...proj.todays]) {
+      expect(typeof row.earmarked_net_worth).toBe("number");
+      expect(row.earmarked_net_worth).toBe(Math.round(row.earmarked_net_worth));
+    }
+  });
+
+  it("fi_status payload carries rounded terminal_earmarked_net_worth(_todays)", async () => {
+    await call("load_plan", { path: planPath });
+    const fi = await call("fi_status");
+    expect(typeof fi.terminal_earmarked_net_worth).toBe("number");
+    expect(fi.terminal_earmarked_net_worth).toBe(Math.round(fi.terminal_earmarked_net_worth));
+    expect(typeof fi.terminal_earmarked_net_worth_todays).toBe("number");
+    expect(fi.terminal_earmarked_net_worth_todays).toBe(Math.round(fi.terminal_earmarked_net_worth_todays));
+  });
+
+  it("run_scenario overrides.contributions.end clamps contributions to zero past the cutoff", async () => {
+    await call("load_plan", { path: planPath });
+    const base = await call("run_projection");
+    await call("run_scenario", { name: "cut-contrib", overrides: { contributions: { end: 2030 } } });
+    const proj = await call("run_projection", { scenario: "cut-contrib" });
+    // 2031: base plan still funds rungs (their own `end` is 2091), the
+    // scenario's hard_end clamp (2030) has already zeroed every rung.
+    const baseAfter = base.rows.find((r: { year: number }) => r.year === 2031);
+    const projAfter = proj.rows.find((r: { year: number }) => r.year === 2031);
+    expect(baseAfter).toBeDefined();
+    expect(projAfter).toBeDefined();
+    expect(baseAfter.contributions).toBeGreaterThan(0);
+    expect(projAfter.contributions).toBe(0);
+  });
 });

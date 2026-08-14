@@ -57,6 +57,7 @@ const PROJECTION_COLUMNS: Array<{ header: string; key: keyof YearRow }> = [
   { header: "Year", key: "year" },
   { header: "Net Worth", key: "net_worth" },
   { header: "Liquid NW", key: "liquid_net_worth" },
+  { header: "Earmarked", key: "earmarked_net_worth" },
   { header: "Income", key: "income" },
   { header: "Expenses", key: "expenses" },
   { header: "Taxes", key: "taxes" },
@@ -100,6 +101,12 @@ interface ScenarioSpec {
   overrides: ScenarioOverrides;
 }
 
+// Keep in sync with SCENARIO_OVERRIDE_KEYS in mcp/server.ts — but not by
+// extending this list: compare's `key=val` syntax (parseScenarioArg below)
+// only ever parses a single numeric value per key, so it stays numeric-only
+// on purpose. `contributions` (an object: {end, keep, scale}) is NOT
+// addable here — it deliberately has no key=val spelling; `--contributions-*`
+// flags below exist only on the `scenario` subcommand, not `compare`.
 const SCENARIO_OVERRIDE_KEYS = [
   "retirement_year",
   "inflation",
@@ -297,6 +304,13 @@ export function buildProgram(io: Io = defaultIo): Command {
     .option("--savings-rate-multiplier <x>", "scale every contribution rung", (v) => Number(v))
     .option("--ss-haircut <x>", "override Social Security haircut", (v) => Number(v))
     .option("--ss-claim-year <n>", "override Social Security claim year", (v) => Number(v))
+    .option("--contributions-end <year>", "clamp every non-kept contribution rung's hard_end no later than this year (never extends it)", (v) => Number(v))
+    .option("--contributions-scale <x>", "multiply every non-kept contribution rung's amount/pct/limit (applies after --savings-rate-multiplier)", (v) => Number(v))
+    .option(
+      "--contributions-keep <names>",
+      "comma-separated contribution rung names exempt from --contributions-end/--contributions-scale",
+      (v) => v,
+    )
     .option("--json", "output JSON instead of a table")
     .action(
       (
@@ -308,6 +322,9 @@ export function buildProgram(io: Io = defaultIo): Command {
           savingsRateMultiplier?: number;
           ssHaircut?: number;
           ssClaimYear?: number;
+          contributionsEnd?: number;
+          contributionsScale?: number;
+          contributionsKeep?: string;
           json?: boolean;
         },
         cmd: Command,
@@ -322,6 +339,26 @@ export function buildProgram(io: Io = defaultIo): Command {
           if (opts.savingsRateMultiplier !== undefined) overrides.savings_rate_multiplier = opts.savingsRateMultiplier;
           if (opts.ssHaircut !== undefined) overrides.ss_haircut = opts.ssHaircut;
           if (opts.ssClaimYear !== undefined) overrides.ss_claim_year = opts.ssClaimYear;
+          if (opts.contributionsEnd !== undefined || opts.contributionsScale !== undefined || opts.contributionsKeep !== undefined) {
+            if (opts.contributionsEnd !== undefined && !Number.isInteger(opts.contributionsEnd)) {
+              throw new Error(`invalid --contributions-end "${opts.contributionsEnd}" (must be an integer year)`);
+            }
+            if (opts.contributionsScale !== undefined && !(Number.isFinite(opts.contributionsScale) && opts.contributionsScale >= 0)) {
+              throw new Error(`invalid --contributions-scale "${opts.contributionsScale}" (must be a finite number >= 0)`);
+            }
+            overrides.contributions = {
+              ...(opts.contributionsEnd !== undefined ? { end: opts.contributionsEnd } : {}),
+              ...(opts.contributionsScale !== undefined ? { scale: opts.contributionsScale } : {}),
+              ...(opts.contributionsKeep !== undefined
+                ? {
+                    keep: opts.contributionsKeep
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter((s) => s.length > 0),
+                  }
+                : {}),
+            };
+          }
           session.defineScenario("cli", overrides);
           printProjection(io, session, "cli", resolveJson(opts, cmd));
         } catch (err) {

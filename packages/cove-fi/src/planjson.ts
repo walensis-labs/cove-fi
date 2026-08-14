@@ -114,6 +114,13 @@ export function planFromJson(data: unknown): Plan {
     if (raw.ret != null && !isValidRet(raw.ret)) {
       issues.push(`${label}.ret must be a number in [${RET_MIN}, ${RET_MAX}] (got ${JSON.stringify(raw.ret)})`);
     }
+    if (raw.earmarked != null && !isBool(raw.earmarked)) issues.push(`${label}.earmarked must be a boolean`);
+    // Only an EXPLICIT liquid:true conflicts with earmarked:true — an
+    // absent `liquid` is fine (normalizePlan resolves it to false for an
+    // earmarked account; see model.ts).
+    if (raw.earmarked === true && raw.liquid === true) {
+      issues.push(`account ${isStr(raw.name) ? raw.name : `[${i}]`}: earmarked accounts cannot be liquid`);
+    }
   });
 
   // ---------- incomes ----------
@@ -184,6 +191,8 @@ export function planFromJson(data: unknown): Plan {
   // ---------- contributions ----------
   const contributions = isArr(d.contributions) ? d.contributions : [];
   if (!isArr(d.contributions)) issues.push("contributions must be an array");
+  const seenContribNames = new Set<string>();
+  const dupContribNames = new Set<string>();
   contributions.forEach((raw, i) => {
     if (!isObj(raw)) {
       issues.push(`contributions[${i}] must be an object`);
@@ -212,6 +221,22 @@ export function planFromJson(data: unknown): Plan {
     if (raw.employer_match_flat != null && !isNum(raw.employer_match_flat))
       issues.push(`${label}.employer_match_flat must be a number or null`);
     if (raw.pretax != null && !isBool(raw.pretax)) issues.push(`${label}.pretax must be a boolean`);
+    if (raw.name != null) {
+      if (!isStr(raw.name)) {
+        issues.push(`${label}.name must be a non-empty string`);
+      } else if (seenContribNames.has(raw.name)) {
+        dupContribNames.add(raw.name);
+      } else {
+        seenContribNames.add(raw.name);
+      }
+    }
+    if (raw.hard_end != null) {
+      if (!isNum(raw.hard_end) || !Number.isInteger(raw.hard_end)) {
+        issues.push(`${label}.hard_end must be a finite integer year`);
+      } else if (raw.hard_end === COAST || raw.hard_end === RETIREMENT) {
+        issues.push(`${label}.hard_end must be a plain year, not the COAST/RETIREMENT sentinel`);
+      }
+    }
     // engine.ts computes `want` from amount, pct_of_income, or
     // (to_limit && annual_limit_key) — anything else falls through to
     // `c.amount!` on undefined and silently yields NaN.
@@ -224,6 +249,9 @@ export function planFromJson(data: unknown): Plan {
       );
     }
   });
+  for (const name of dupContribNames) {
+    issues.push(`contributions: duplicate name "${name}" — rung names must be unique`);
+  }
 
   // ---------- house ----------
   if (d.house != null) {

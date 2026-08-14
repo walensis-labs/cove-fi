@@ -148,6 +148,27 @@ each account's current balance forward at its own resolved rate to
 retirement spending — instead of the old trailing-spend x `coast_multiple`
 heuristic, which is deprecated and ignored.
 
+As of 0.5, `run_scenario`/`scenario`/`compare` validate their overrides
+strictly — an unrecognized key (top-level, or nested inside
+`extra_expenses`/`extra_incomes`/`contributions`) is a validation error
+naming it and the supported set, where before 0.5 it was silently
+dropped and the scenario ran as an unchanged copy of the base plan; see
+`docs/SEMANTICS.md`'s Scenario overrides section if you built scenarios
+against an earlier version. Contribution rungs can now carry a `name` and
+a `hard_end`, and `run_scenario`'s `overrides.contributions` (or the CLI's
+`--contributions-end`/`--contributions-scale`/`--contributions-keep`) can
+stop, scale, or exempt individual named rungs instead of only the blanket
+`savings_rate_multiplier`. Accounts can also be flagged `earmarked: true`
+to save toward a specific goal outside general-purpose net worth — the
+balance is excluded from `net_worth`, FI/coast/depletion year, Monte Carlo
+success rate, and the retirement drawdown waterfall, reported separately
+as `earmarked_net_worth` (and `terminal_earmarked_net_worth` in
+`fi_status`), and spent via an expense's `fund_from` rather than the
+general drawdown. One honest caveat: dividends on an earmarked *taxable*
+account are still taxed to the household every year — the household still
+legally owns the account — a deliberate but revisitable call; see
+`docs/SEMANTICS.md`'s Earmarked assets section.
+
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
@@ -156,7 +177,10 @@ heuristic, which is deprecated and ignored.
   propose-only YNAB seeding). **Shipped.**
 - **0.4** — per-account/per-tax-class return overrides, gated cash-interest
   taxation, correlated T-bill Monte Carlo cash sleeves, true CoastFIRE
-  `coast_year`. **This release.**
+  `coast_year`. **Shipped.**
+- **0.5** — strict scenario override validation (bug fix), named
+  contribution rungs with stop/scale/keep scenario overrides, earmarked
+  assets. **This release.**
 - **Next** — integrations (third-party import/export), bond
   series/portfolio mixes.
 
