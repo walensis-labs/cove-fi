@@ -32,8 +32,14 @@ export interface Account {
   // general-purpose net worth. normalizePlan defaults this false and, when
   // true, forces `liquid` to false regardless of what `liquid` says (see
   // normalizePlan below); planjson separately rejects an EXPLICIT
-  // liquid:true paired with earmarked:true. The engine does not read this
-  // field yet (0.5.0 Task 3).
+  // liquid:true paired with earmarked:true. The engine reads this field for
+  // two things (0.5.0 Task 3): NW reporting (earmarked balances sum into
+  // YearRow.earmarked_net_worth and are excluded from net_worth) and
+  // retirement drawdown exclusion (the discretionary drawdown waterfall
+  // skips earmarked accounts entirely, so they're never automatically
+  // raided to cover a cash-flow gap). earmarked + rmd is a pathological
+  // configuration: RMDs still fire (legally forced) regardless of
+  // earmarked — avoid flagging rmd accounts as earmarked.
   earmarked?: boolean;
 }
 

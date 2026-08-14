@@ -486,6 +486,14 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
           if (acc.tax !== tt || remaining <= 0 || bal[acc.name]! <= 0) {
             continue;
           }
+          // 0.5.0: earmarked accounts are saved toward a specific goal, not
+          // general-purpose retirement spending — the discretionary
+          // waterfall must never raid one to cover a cash-flow gap. RMDs
+          // (below, forced by law) are NOT gated by this — see model.ts's
+          // earmarked doc comment.
+          if (acc.earmarked) {
+            continue;
+          }
           const take = Math.min(bal[acc.name]!, remaining);
           let extra = 0.0;
           if (tt === "trad") {

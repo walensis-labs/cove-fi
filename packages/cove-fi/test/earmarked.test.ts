@@ -1,14 +1,20 @@
 /**
- * Validation shell for the 0.5.0 additive schema fields:
+ * Validation shell for the 0.5.0 additive schema fields, PLUS the engine
+ * behavior Task 3 wires up on top of them:
  *   - Contribution.name (optional, non-empty, unique among named rungs)
  *   - Contribution.hard_end (optional, plain finite integer year — COAST/
  *     RETIREMENT sentinels rejected)
  *   - Account.earmarked (optional, default false; earmarked + explicit
  *     liquid:true is rejected)
  *
- * Engine does not read any of these fields yet (0.5.0 Task 3) — this file
- * only exercises normalizePlan()'s defaulting and planFromJson()'s
- * validation.
+ * The engine reads `earmarked` for two things (0.5.0 Task 3): NW reporting
+ * (earmarked balances sum into YearRow.earmarked_net_worth and are excluded
+ * from net_worth) and retirement drawdown exclusion (the discretionary
+ * drawdown waterfall skips earmarked accounts entirely — see engine.ts's
+ * `if (acc.earmarked) continue;` guard, right after the `acc.tax !== tt`
+ * check). The earlier schema-only validation tests below still just
+ * exercise normalizePlan()'s defaulting and planFromJson()'s validation;
+ * the engine-behavior describe blocks further down exercise the guard.
  */
 import { describe, expect, it } from "vitest";
 import { run, runWithMeta } from "../src/engine.js";
@@ -269,6 +275,95 @@ describe("engine — earmarked exclusion pins (coast/fi/depletion/MC keyed off l
     const mc1 = runMonteCarlo(plan1, { trials: 30, seed: 42 });
     const mc2 = runMonteCarlo(plan2, { trials: 30, seed: 42 });
     expect(mc2.success_rate).toBe(mc1.success_rate);
+  });
+});
+
+/**
+ * CRITICAL fix-round pin: the retirement drawdown waterfall (engine.ts's
+ * `order = ["taxable", "hsa", "trad", "roth", "cash"]` loop) is keyed
+ * purely on `acc.tax`, not on `liquid`/`earmarked` — so, unlike the
+ * hsa-typed probe above (which the waterfall never even reaches, because
+ * "B" alone always covers the need), an earmarked account of a class the
+ * waterfall DOES reach must be actively excluded, or it gets raided once
+ * the plan's other liquid accounts run dry. `engine.ts` now has
+ * `if (acc.earmarked) continue;` right after the `acc.tax !== tt` check
+ * for exactly this reason.
+ *
+ * "house_fund" here is `tax: "taxable"` — the FIRST tier in the drawdown
+ * order, and the same tier as "B" (the plan's only liquid account) — so
+ * without the guard it would be drawn from immediately once B is
+ * exhausted, in the very same pass. Manually verified (locally, not
+ * committed): temporarily short-circuiting the guard
+ * (`if (acc.earmarked && false) continue;`) makes house_fund's balance
+ * decline starting the very first retirement year in both scenarios below
+ * (5,000 -> 0 by the depletion year; 500,000 draining by thousands/year
+ * once B is gone) — i.e. this test's "byte-identical through retirement"
+ * assertion is a real regression guard against that guard being removed,
+ * not a vacuous one.
+ *
+ * retirement_year === start_year (immediate retirement) so every simulated
+ * year exercises the retirement drawdown loop, no working-year cash-flow
+ * quirks involved. B (liquid, taxable, $150k) is sized to genuinely
+ * exhaust a few years in against a flat $40k/yr expense — giving a
+ * NON-null depletion_year on both sides (closing the earlier null===null
+ * weakness in the probe above). Note: because house_fund is ALSO `tax:
+ * "taxable"`, it still accrues the household's ordinary dividend tax
+ * (engine.ts's `div` loop sums ALL taxable-class balances, earmarked or
+ * not — real accounts pay real tax on real dividends regardless of what
+ * they're earmarked for) — so, unlike the hsa probe above, net_worth is
+ * NOT asserted equal between the two runs here; that small tax-driven
+ * divergence is expected and orthogonal to what this pin is checking.
+ */
+describe("engine — earmarked retirement-drawdown exclusion (CRITICAL: earmarked accounts must never be raided by the discretionary waterfall)", () => {
+  function buildPlan(earmarkedBalance: number): Plan {
+    return normalizePlan({
+      birth_year: 1990,
+      accounts: [
+        { name: "B", tax: "taxable", balance: 150_000, basis: 150_000, growth: 0.03 },
+        { name: "house_fund", tax: "taxable", balance: earmarkedBalance, growth: 0, earmarked: true },
+      ],
+      incomes: [],
+      social_security: [],
+      expenses: [{ name: "living", amount: 40_000, start: 2026, end: 2091 }],
+      contributions: [],
+      house: null,
+      assumptions: {
+        ...DEFAULT_ASSUMPTIONS,
+        start_year: 2026,
+        end_year: 2040,
+        retirement_year: 2026,
+        inflation: 0,
+        fi_multiple: 25,
+      },
+    });
+  }
+
+  it("B (liquid, taxable) genuinely exhausts (non-null depletion_year, identical both sides) while house_fund (earmarked, taxable — the SAME drawdown tier) stays byte-identical through every retirement year, and scales exactly 100x", () => {
+    const plan1 = buildPlan(5_000);
+    const plan2 = buildPlan(500_000);
+    const r1 = runWithMeta(plan1);
+    const r2 = runWithMeta(plan2);
+
+    const depletionYear = (rows: typeof r1.rows, retirementYear: number) =>
+      rows.find((r) => r.year >= retirementYear && r.liquid_net_worth <= 0)?.year ?? null;
+    const dep1 = depletionYear(r1.rows, 2026);
+    const dep2 = depletionYear(r2.rows, 2026);
+
+    // sanity: non-vacuous — B genuinely runs dry within the horizon.
+    expect(dep1).not.toBeNull();
+    expect(dep2).toBe(dep1);
+
+    // house_fund is NEVER touched: flat at its starting balance in EVERY
+    // row, including every year after B (and thus liquid_net_worth) hits
+    // zero — the exact scenario where, without the guard, the waterfall
+    // would otherwise cascade into it.
+    for (const r of r1.rows) expect(r.earmarked_net_worth).toBe(5_000);
+    for (const r of r2.rows) expect(r.earmarked_net_worth).toBe(500_000);
+
+    // exact 100x relationship end to end (not just at the terminal row).
+    for (let i = 0; i < r1.rows.length; i++) {
+      expect(r2.rows[i]!.earmarked_net_worth).toBeCloseTo(r1.rows[i]!.earmarked_net_worth * 100, 6);
+    }
   });
 });
 
