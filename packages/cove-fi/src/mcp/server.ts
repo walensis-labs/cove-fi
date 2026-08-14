@@ -287,7 +287,7 @@ export function createServer(session: Session): McpServer {
     "create_plan",
     {
       description:
-        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars). Growth overrides: an account's `ret` and `assumptions.class_returns.<tax-class>` (both finite, in [-0.5, 0.5]) let you set nominal return by account or by tax class, falling back to `assumptions.ret` when unset. A contribution's `name` (unique among named rungs) lets `run_scenario`'s `overrides.contributions.keep` target it by name, and its `hard_end` caps it at a plain calendar year independent of `end`. An account's `earmarked: true` (implies `liquid: false`) excludes its balance from `net_worth`/the retirement drawdown waterfall and reports it separately as `earmarked_net_worth`.",
+        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars). Income `amount` values must be GROSS annual dollars — confirm with the user whether a reported income figure is gross or take-home (and convert take-home with `income_gross_from_net`) before using it here. Growth overrides: an account's `ret` and `assumptions.class_returns.<tax-class>` (both finite, in [-0.5, 0.5]) let you set nominal return by account or by tax class, falling back to `assumptions.ret` when unset. A contribution's `name` (unique among named rungs) lets `run_scenario`'s `overrides.contributions.keep` target it by name, and its `hard_end` caps it at a plain calendar year independent of `end`. An account's `earmarked: true` (implies `liquid: false`) excludes its balance from `net_worth`/the retirement drawdown waterfall and reports it separately as `earmarked_net_worth`.",
       inputSchema: { plan: z.record(z.unknown()) },
     },
     ({ plan }) => guarded(() => session.createPlan(plan)),
@@ -297,7 +297,7 @@ export function createServer(session: Session): McpServer {
     "update_plan",
     {
       description:
-        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions` — note `set.assumptions.class_returns`, being one key of that shallow merge, is replaced WHOLESALE, not merged per tax-class). At least one of `add`/`set` is required (amounts are annual, today's dollars). Appended contributions may carry `name` (unique among named rungs — targetable by `run_scenario`'s `overrides.contributions.keep`) and `hard_end` (a plain calendar year cap independent of `end`); appended accounts may carry `earmarked: true` to exclude the balance from `net_worth` and report it under `earmarked_net_worth` instead.",
+        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions` — note `set.assumptions.class_returns`, being one key of that shallow merge, is replaced WHOLESALE, not merged per tax-class). At least one of `add`/`set` is required (amounts are annual, today's dollars). Income `amount` values must be GROSS annual dollars — confirm with the user whether a reported income figure is gross or take-home (and convert take-home with `income_gross_from_net`) before using it here. Appended contributions may carry `name` (unique among named rungs — targetable by `run_scenario`'s `overrides.contributions.keep`) and `hard_end` (a plain calendar year cap independent of `end`); appended accounts may carry `earmarked: true` to exclude the balance from `net_worth` and report it under `earmarked_net_worth` instead.",
       inputSchema: {
         add: z.record(z.unknown()).optional(),
         set: z.record(z.unknown()).optional(),
@@ -479,10 +479,74 @@ export function createServer(session: Session): McpServer {
         "savings rate over the last 6 complete months. Never touches the loaded plan; the caller " +
         "must confirm with the user and pass values into create_plan/update_plan by hand. If no " +
         "token is set, returns `{ configured: false, instructions }` (not an error). Seeded " +
-        "figures are MONTHLY; multiply ×12 when building plan entries.",
+        "figures are MONTHLY; multiply ×12 when building plan entries. NOTE: YNAB-derived income " +
+        "is TAKE-HOME (post-tax deposits) — convert it with `income_gross_from_net` before it " +
+        "enters a plan; cove-fi plans always store GROSS income.",
       inputSchema: { budget_id: z.string().optional() },
     },
     ({ budget_id }) => guarded(() => seedFromYnab(budget_id === undefined ? undefined : { budgetId: budget_id })),
+  );
+
+  server.registerTool(
+    "income_gross_from_net",
+    {
+      description:
+        "PROPOSE-ONLY calculator (never touches the loaded plan): given a take-home (post-tax) " +
+        "annual figure, computes the GROSS annual salary that would produce it — " +
+        "`gross = net / (1 - (income_tax + local_tax)) + deferrals`. Plans always store GROSS " +
+        "income; use this before passing a take-home number (e.g. from a pay stub or YNAB " +
+        "deposits) into create_plan/update_plan. `income_tax`/`local_tax` default to the loaded " +
+        "plan's assumptions when omitted (an error if no plan is loaded and either is omitted). " +
+        "Pass `stated_gross` to reconcile a self-reported gross figure against the computed one — " +
+        "the response's `reconciliation.agrees` is true when they're within 1% of each other.",
+      inputSchema: {
+        net_annual: z.number().positive(),
+        deferrals_annual: z.number().min(0).default(0),
+        income_tax: z.number().min(0).max(1).optional(),
+        local_tax: z.number().min(0).max(1).optional(),
+        stated_gross: z.number().positive().optional(),
+      },
+    },
+    ({ net_annual, deferrals_annual, income_tax, local_tax, stated_gross }) =>
+      guarded(() => {
+        if (income_tax === undefined || local_tax === undefined) {
+          if (!session.plan) {
+            throw new Error("income_tax and local_tax are required when no plan is loaded");
+          }
+          income_tax ??= session.plan.assumptions.income_tax;
+          local_tax ??= session.plan.assumptions.local_tax;
+        }
+        const ordinaryRateUsed = income_tax + local_tax;
+        if (ordinaryRateUsed >= 1) {
+          throw new Error("income_tax + local_tax must be < 1");
+        }
+        const computedGross = Math.round(net_annual / (1 - ordinaryRateUsed) + deferrals_annual);
+        const result: {
+          computed_gross: number;
+          net_annual: number;
+          deferrals_annual: number;
+          ordinary_rate_used: number;
+          formula: string;
+          reconciliation?: { stated_gross: number; computed_gross: number; delta: number; agrees: boolean };
+        } = {
+          computed_gross: computedGross,
+          net_annual: Math.round(net_annual),
+          deferrals_annual: Math.round(deferrals_annual),
+          ordinary_rate_used: ordinaryRateUsed,
+          formula: "gross = net / (1 - (income_tax + local_tax)) + deferrals",
+        };
+        if (stated_gross !== undefined) {
+          const roundedStated = Math.round(stated_gross);
+          const delta = computedGross - roundedStated;
+          result.reconciliation = {
+            stated_gross: roundedStated,
+            computed_gross: computedGross,
+            delta,
+            agrees: Math.abs(delta) <= 0.01 * roundedStated,
+          };
+        }
+        return result;
+      }),
   );
 
   server.registerPrompt(
@@ -514,7 +578,7 @@ const ONBOARD_PROMPT = `You are guiding the user through setting up a Cove FI re
 3. Run a manual interview to collect whatever seeding didn't cover (birth years, account balances, and contributions are never in the seed proposal — always ask for these; other sections may already be confirmed from step 2). Ask one section at a time, in this fixed order:
    - Household: who's included, and birth year(s).
    - Accounts & balances: name, \`tax\` (one of \`cash\`|\`taxable\`|\`trad\`|\`roth\`|\`hsa\`|\`529\`), balance, and cost basis where relevant.
-   - Income streams: source, amount, and timing.
+   - Income streams: source, amount, and timing. Cove FI plans always store GROSS (pre-tax) annual income — never assume a reported figure is gross. For EVERY income figure, first establish whether it's take-home (post-tax, e.g. a paycheck deposit or YNAB-derived amount) or already gross. If take-home: convert any reported period to annual (a monthly figure ×12), then ask for ALL annual pretax deferrals (401k, HSA, insurance premiums, etc — these can never be inferred from a deposit amount), then call \`income_gross_from_net\`. Read back the full chain to the user — the reported figure (with its period), the annualized net, the deferrals, and the computed gross — for explicit confirmation before you call \`create_plan\` or \`update_plan\` with it.
    - Social Security (optional): ask if the user wants to include SS benefits; if so, collect \`pia_monthly\` and \`claim_year\` for each person.
    - Recurring expenses & housing.
    - Contributions & savings rungs (what gets funded, in what order).
