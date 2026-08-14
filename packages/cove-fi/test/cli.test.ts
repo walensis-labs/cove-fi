@@ -137,6 +137,94 @@ describe("cli", () => {
     expect(scenarioParsed.fi.retirement_year).not.toBe(baseParsed.fi.retirement_year);
   });
 
+  it("scenario --contributions-scale 0 zeroes contributions (output differs from run)", async () => {
+    const planPath = writeTmpPlan(dir);
+    const base = await runCli(["run", planPath, "--json"]);
+    const scenario = await runCli(["scenario", planPath, "--contributions-scale", "0", "--json"]);
+    expect(base.exitCode).toBeUndefined();
+    expect(scenario.exitCode).toBeUndefined();
+    const baseParsed = JSON.parse(base.out[0]!);
+    const scenarioParsed = JSON.parse(scenario.out[0]!);
+    const baseMid = baseParsed.rows.find((r: { year: number }) => r.year === 2027);
+    const scenMid = scenarioParsed.rows.find((r: { year: number }) => r.year === 2027);
+    expect(baseMid.contributions).toBeGreaterThan(0);
+    expect(scenMid.contributions).toBe(0);
+  });
+
+  it("scenario --contributions-end <year> clamps contributions to zero past the cutoff (output differs from run)", async () => {
+    const planPath = writeTmpPlan(dir);
+    const base = await runCli(["run", planPath, "--json"]);
+    const scenario = await runCli(["scenario", planPath, "--contributions-end", "2030", "--json"]);
+    expect(base.exitCode).toBeUndefined();
+    expect(scenario.exitCode).toBeUndefined();
+    const baseParsed = JSON.parse(base.out[0]!);
+    const scenarioParsed = JSON.parse(scenario.out[0]!);
+    // 2031: base plan still funds rungs (their own `end` is 2091), the
+    // scenario's hard_end clamp (2030) has already zeroed every rung.
+    const baseAfter = baseParsed.rows.find((r: { year: number }) => r.year === 2031);
+    const scenAfter = scenarioParsed.rows.find((r: { year: number }) => r.year === 2031);
+    expect(baseAfter.contributions).toBeGreaterThan(0);
+    expect(scenAfter.contributions).toBe(0);
+  });
+
+  it("scenario --contributions-keep trims comma-separated names and exempts the kept rung from --contributions-scale", async () => {
+    const plan = syntheticPlan();
+    plan.contributions[2] = { ...plan.contributions[2]!, name: "roth-fixed" }; // { account: "roth", amount: 7000 } rung
+    const planPath = join(dir, "named-plan.toml");
+    writeFileSync(planPath, dumpPlan(plan));
+
+    const base = await runCli(["run", planPath, "--json"]);
+    const kept = await runCli([
+      "scenario",
+      planPath,
+      "--contributions-scale",
+      "0",
+      "--contributions-keep",
+      " roth-fixed ",
+      "--json",
+    ]);
+    expect(base.exitCode).toBeUndefined();
+    expect(kept.exitCode).toBeUndefined();
+    const baseParsed = JSON.parse(base.out[0]!);
+    const keptParsed = JSON.parse(kept.out[0]!);
+    const baseMid = baseParsed.rows.find((r: { year: number }) => r.year === 2027);
+    const keptMid = keptParsed.rows.find((r: { year: number }) => r.year === 2027);
+    // every OTHER rung scaled to 0, but roth-fixed's $7000/yr amount survives
+    // (name-trimming worked — an untrimmed " roth-fixed " would not match
+    // the plan's "roth-fixed" rung and applyOverrides would throw instead).
+    expect(keptMid.contributions).not.toBe(baseMid.contributions);
+    expect(keptMid.contributions).toBeGreaterThan(0);
+  });
+
+  it("scenario --contributions-end with a non-integer value exits nonzero, never a raw stack", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["scenario", planPath, "--contributions-end", "2030.5"]);
+    expect(exitCode).toBe(1);
+    const text = err.join("\n");
+    expect(text).toMatch(/^error:/);
+    expect(text).toMatch(/contributions-end/);
+    expect(text).not.toMatch(/at .*\.ts:\d+/);
+  });
+
+  it("scenario --contributions-scale with a negative value exits nonzero, never a raw stack", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["scenario", planPath, "--contributions-scale", "-1"]);
+    expect(exitCode).toBe(1);
+    const text = err.join("\n");
+    expect(text).toMatch(/^error:/);
+    expect(text).toMatch(/contributions-scale/);
+    expect(text).not.toMatch(/at .*\.ts:\d+/);
+  });
+
+  it("compare with a contributions= key=val exits nonzero (compare's key=val syntax is numeric-only)", async () => {
+    const planPath = writeTmpPlan(dir);
+    const { err, exitCode } = await runCli(["compare", planPath, "--scenario", "x:contributions=1"]);
+    expect(exitCode).toBe(1);
+    const text = err.join("\n");
+    expect(text).toMatch(/^error:/);
+    expect(text).toMatch(/contributions/);
+  });
+
   it("compare prints a summary table with fi_year, depletion_year, and terminal NW per scenario", async () => {
     const planPath = writeTmpPlan(dir);
     const { out, exitCode } = await runCli([

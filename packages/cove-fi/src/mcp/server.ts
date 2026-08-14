@@ -62,6 +62,7 @@ const DOLLAR_ROW_KEYS = [
   "taxes",
   "withdrawals",
   "contributions",
+  "earmarked_net_worth",
 ] as const satisfies readonly (keyof YearRow)[];
 
 function roundRow(row: YearRow): YearRow {
@@ -162,6 +163,24 @@ const scenarioOverridesShape = {
   inflation: z.number().optional(),
   ret: z.number().optional(),
   savings_rate_multiplier: z.number().optional(),
+  // 0.5.0: per-rung overrides — see applyOverrides (session.ts) for the full
+  // end/keep/scale composition rules. Unlike extra_expenses/extra_incomes
+  // above, there's only ONE variant of this nested schema (not a
+  // catchall/strict pair): it's always `.strict()`, so an unknown key
+  // nested inside `contributions` is rejected by zod itself wherever this
+  // shape is used — at the permissive SDK-boundary schema below (nested
+  // strictness isn't relaxed by the outer object's `.catchall`) and again
+  // at the handler's `scenarioOverridesStrict` re-parse (which spreads this
+  // same shape in below). Because scenarioOverridesStrict spreads
+  // ...scenarioOverridesShape, adding it once here reaches both.
+  contributions: z
+    .object({
+      end: z.number().int().optional(),
+      keep: z.array(z.string()).optional(),
+      scale: z.number().min(0).optional(),
+    })
+    .strict()
+    .optional(),
   ss_haircut: z.number().optional(),
   ss_claim_year: z.number().optional(),
   extra_expenses: z.array(extraExpenseShape).optional(),
@@ -268,7 +287,7 @@ export function createServer(session: Session): McpServer {
     "create_plan",
     {
       description:
-        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars). Growth overrides: an account's `ret` and `assumptions.class_returns.<tax-class>` (both finite, in [-0.5, 0.5]) let you set nominal return by account or by tax class, falling back to `assumptions.ret` when unset.",
+        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars). Growth overrides: an account's `ret` and `assumptions.class_returns.<tax-class>` (both finite, in [-0.5, 0.5]) let you set nominal return by account or by tax class, falling back to `assumptions.ret` when unset. A contribution's `name` (unique among named rungs) lets `run_scenario`'s `overrides.contributions.keep` target it by name, and its `hard_end` caps it at a plain calendar year independent of `end`. An account's `earmarked: true` (implies `liquid: false`) excludes its balance from `net_worth`/the retirement drawdown waterfall and reports it separately as `earmarked_net_worth`.",
       inputSchema: { plan: z.record(z.unknown()) },
     },
     ({ plan }) => guarded(() => session.createPlan(plan)),
@@ -278,7 +297,7 @@ export function createServer(session: Session): McpServer {
     "update_plan",
     {
       description:
-        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions` — note `set.assumptions.class_returns`, being one key of that shallow merge, is replaced WHOLESALE, not merged per tax-class). At least one of `add`/`set` is required (amounts are annual, today's dollars).",
+        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions` — note `set.assumptions.class_returns`, being one key of that shallow merge, is replaced WHOLESALE, not merged per tax-class). At least one of `add`/`set` is required (amounts are annual, today's dollars). Appended contributions may carry `name` (unique among named rungs — targetable by `run_scenario`'s `overrides.contributions.keep`) and `hard_end` (a plain calendar year cap independent of `end`); appended accounts may carry `earmarked: true` to exclude the balance from `net_worth` and report it under `earmarked_net_worth` instead.",
       inputSchema: {
         add: z.record(z.unknown()).optional(),
         set: z.record(z.unknown()).optional(),
@@ -381,8 +400,11 @@ export function createServer(session: Session): McpServer {
         "replaces assumptions.class_returns WHOLESALE (not a per-key merge) and only affects deterministic " +
         "projections (run_projection/fi_status/compare_scenarios) — monte_carlo ignores invested return " +
         "overrides (its rates schedule dominates ret/class_returns for every account). " +
-        "`overrides.contributions.keep` exempts rungs from the contributions override only " +
-        "(its own scale/end); savings_rate_multiplier still applies to kept rungs.",
+        "`overrides.contributions` {end, keep, scale} tunes contribution rungs AFTER " +
+        "savings_rate_multiplier (the two compose): `end` (a year) clamps every non-kept rung's " +
+        "hard_end — it can only pull the cutoff earlier, never extend it past a rung's own end; " +
+        "`keep` (rung names) exempts those rungs from this override's own scale/end (savings_rate_multiplier " +
+        "still applies to kept rungs); `scale` multiplies every non-kept rung's amount/pct/limit.",
       // Permissive on purpose — see the comment above scenarioOverridesStrict.
       inputSchema: { name: z.string(), overrides: z.object(scenarioOverridesShape).catchall(z.unknown()) },
     },

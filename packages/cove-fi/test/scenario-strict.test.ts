@@ -35,6 +35,27 @@ describe("run_scenario strict override validation", () => {
     const text = (r.content as { text: string }[])[0]!.text;
     expect(text).toContain("contributions_end");
     expect(text).toContain("retirement_year"); // supported set present
+    expect(text).toContain("contributions"); // Task 5: contributions object joins the supported set
+  });
+
+  it("unknown key inside overrides.contributions errors", async () => {
+    await call("load_plan", { path: planPath });
+    const r = await client.callTool({
+      name: "run_scenario",
+      arguments: { name: "bad-contrib", overrides: { contributions: { end: 2039, bogus: true } } },
+    });
+    expect(r.isError).toBe(true);
+    const text = (r.content as { text: string }[])[0]!.text;
+    expect(text).toContain("bogus");
+  });
+
+  it("well-formed overrides.contributions (end/keep/scale) is accepted", async () => {
+    await call("load_plan", { path: planPath });
+    const r = await call("run_scenario", {
+      name: "good-contrib",
+      overrides: { contributions: { end: 2039, keep: [], scale: 0.5 } },
+    });
+    expect(r).toHaveProperty("fi");
   });
 
   it("unknown nested field in extra_expenses errors", async () => {
