@@ -128,10 +128,13 @@ by the Tax model below; the engine never asks whether a figure is
 "take-home" or applies any conversion on a plan's behalf.
 
 An in-engine gross-up (`Income.net`, converting a take-home figure inside
-the tax convergence loop) was built and then reverted mid-release — it
-composed badly with multi-income households and the pretax waterfall's own
-iterative fixed point, and the product call landed on keeping the engine's
-tax model simple: **one meaning for `amount`, always.** Converting
+the tax convergence loop) was built and then reverted mid-release — with a
+net-declared income the pretax term cancels out of the tax base, so each
+dollar of pretax contribution added exactly a dollar of available cash,
+turning the tax/pretax convergence into a slope-1 march that under-funded
+capped rungs (they settled at min(want, 4 × (net − expenses))). The product
+call landed on keeping the engine's tax model simple: **one meaning for
+`amount`, always.** Converting
 take-home pay to gross is instead a **propose-only calculator**, entirely
 outside the engine:
 
@@ -563,8 +566,10 @@ new session) reports `version` (the package's own semver),
 (`SCENARIO_OVERRIDE_KEYS`, mirroring the Scenario overrides section above),
 `metric_definitions`, and `capabilities` — every registered MCP tool name.
 `capabilities` is derived, not hand-maintained: every tool registers
-through a shared wrapper that appends its name to a module-scoped list, so
-this field cannot drift from what the server actually exposes. Call it to
+through a shared wrapper that appends its name to a list scoped per
+`createServer()` call (not module-level), ensuring repeated server instances
+in tests don't accumulate stale names, so this field cannot drift from what
+the server actually exposes. Call it to
 detect a stale or partial deploy before trusting any other tool's numbers,
 and to check `metrics_version` whenever a cached metric value needs
 revalidating against its current definition.

@@ -87,6 +87,11 @@ export interface YearRates {
 // by exhausted cash flow, or a $0 withdrawal, is noise for a human-readable
 // audit, not a reconciliation requirement — omitting a term whose value is
 // exactly 0 never changes a sum).
+// The exact-reconciliation guarantee relies on synthetic house/mortgage lines
+// being recovered as before/after deltas of the running expense accumulator,
+// which is bit-exact for realistic magnitudes (Sterbenz) but not a universal
+// float guarantee for pathological plans; MCP payloads round to whole dollars
+// regardless.
 export interface YearDetail {
   year: number;
   // Every plan.incomes line active this year, in plan order, at its grossed
