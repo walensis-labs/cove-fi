@@ -76,7 +76,7 @@ instead of starting from the bare template.
 
 ## Use it from an AI assistant (MCP)
 
-`cove-fi mcp` starts a stdio MCP server exposing thirteen tools so you can
+`cove-fi mcp` starts a stdio MCP server exposing sixteen tools so you can
 talk through your plan in plain language instead of memorizing CLI flags —
 "try retiring at 57", "what if Social Security gets cut 25%", "compare 60
 vs 65", "what's my success rate over 1000 simulations":
@@ -88,6 +88,10 @@ vs 65", "what's my success rate over 1000 simulations":
   `set_assumption`
 - **Projection:** `run_projection`, `fi_status`, `run_scenario`,
   `monte_carlo`, `compare_scenarios`
+- **Trust & auditing:** `income_gross_from_net` (propose-only take-home ->
+  gross calculator), `get_engine_info` (version/capabilities handshake),
+  `audit_cash_flow` (per-year income/expense/tax table with duplicate-line
+  and funding-shortfall flags)
 
 As with the CLI `scenario` command, `run_scenario`'s `retirement_year`
 override moves any income whose `end = "retirement"` right along with it —
@@ -169,6 +173,26 @@ account are still taxed to the household every year — the household still
 legally owns the account — a deliberate but revisitable call; see
 `docs/SEMANTICS.md`'s Earmarked assets section.
 
+As of 0.6, cove-fi plans have always stored GROSS (pre-tax) income, but
+nothing enforced it — a plan quietly seeded from take-home deposits (a
+YNAB export, a paycheck figure) taxed already-taxed money without any
+signal that anything was wrong. This release doesn't touch the engine's
+tax model to fix that; instead it adds a propose-only calculator,
+`income_gross_from_net`, that converts a take-home figure to gross
+(`gross = net / (1 - (income_tax + local_tax)) + deferrals`, reconciling
+against a self-reported gross when given) — and wires the `onboard` prompt
+to call it automatically, settling gross-vs-take-home, annualizing period
+figures, and collecting every pretax deferral before a number ever reaches
+`create_plan`/`update_plan`. Two more trust tools land alongside it:
+`get_engine_info`, a version/capabilities/metric-definition handshake
+callable before any plan is loaded (see `docs/SEMANTICS.md`'s Metric
+versioning section for the `METRICS_VERSION` bump obligation it exists to
+surface), and `audit_cash_flow`, a per-year table built over a new opt-in
+engine `detail` that reconciles exactly to each `YearRow`'s totals and
+flags duplicate income/expense line names and `fund_from` funding
+shortfalls. All three are additive — `run()`/`YearRow` are unchanged, and
+no existing plan's projected numbers move.
+
 ## Roadmap
 
 - **0.2** — Monte Carlo simulation (historical block-bootstrap returns)
@@ -180,7 +204,11 @@ legally owns the account — a deliberate but revisitable call; see
   `coast_year`. **Shipped.**
 - **0.5** — strict scenario override validation (bug fix), named
   contribution rungs with stop/scale/keep scenario overrides, earmarked
-  assets. **This release.**
+  assets. **Shipped.**
+- **0.6** — `income_gross_from_net` (take-home -> gross calculator),
+  `get_engine_info` (version/capabilities handshake), opt-in engine
+  `detail`, `audit_cash_flow` (per-year audit with duplicate-line/funding-
+  shortfall flags). **This release.**
 - **Next** — integrations (third-party import/export), bond
   series/portfolio mixes.
 

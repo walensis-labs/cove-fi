@@ -75,6 +75,21 @@ expectations test — does each account's current balance, grown at its own
 rate to `retirement_year`, already clear `fi_multiple x` projected
 retirement spending — rather than a trailing-spend heuristic.
 
+As of 0.6, if you ever seeded a plan's income from take-home deposits
+(a YNAB export, a paycheck amount, anything post-tax), that plan has been
+taxing already-taxed money — cove-fi plans always store GROSS income, and
+there is no in-engine gross-up to fix it for you. Run the new
+`income_gross_from_net` calculator (propose-only; the onboarding flow now
+calls it automatically) to convert take-home to gross before it goes into
+`create_plan`/`update_plan`. Two more trust tools land alongside it:
+`get_engine_info` (a version/capabilities handshake, callable before any
+plan is loaded) and `audit_cash_flow` (a per-year income/expense/tax table
+built over an opt-in engine `detail`, flagging duplicate line names and
+`fund_from` funding shortfalls) — see `docs/SEMANTICS.md`'s Income is
+always gross and Cash-flow audit sections. Nothing about the projection
+engine itself changed this release; every existing plan's numbers are
+unaffected.
+
 As of 0.5, unknown scenario override keys are a validation error instead
 of a silent no-op (a typo used to run silently as an unmodified base
 plan — see `docs/SEMANTICS.md`'s Scenario overrides section if you were
@@ -96,7 +111,10 @@ still being spendable for their actual purpose via an expense's `fund_from`.
   cash-interest taxation, correlated T-bill Monte Carlo cash sleeves, true
   CoastFIRE `coast_year`. **Shipped.**
 - **0.5** — strict scenario override validation, named contribution rungs
-  with stop/scale/keep overrides, earmarked assets. **This release.**
+  with stop/scale/keep overrides, earmarked assets. **Shipped.**
+- **0.6** — the net-income trap: `income_gross_from_net` calculator,
+  `get_engine_info` handshake, opt-in engine detail, `audit_cash_flow`.
+  **This release.**
 - **Next** — integrations (third-party import/export), bond
   series/portfolio mixes
 
