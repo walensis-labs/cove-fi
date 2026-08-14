@@ -23,7 +23,7 @@ import { type Assumptions, DEFAULT_ASSUMPTIONS, type TaxType } from "../model.js
 import { isValidRet, RET_MAX, RET_MIN } from "../planjson.js";
 import { listPlans, resolvePlanRef } from "../planstore.js";
 import { seedFromYnab } from "../seed/ynab.js";
-import { type FiStatus, Session } from "../session.js";
+import { type CashFlowAuditYear, type FiStatus, Session } from "../session.js";
 import { thinIndices, thinMonteCarloResult, thinRows } from "../thin.js";
 
 // ---------------------------------------------------------------------
@@ -71,6 +71,14 @@ const DOLLAR_ROW_KEYS = [
 function roundRow(row: YearRow): YearRow {
   const out = { ...row };
   for (const k of DOLLAR_ROW_KEYS) out[k] = Math.round(row[k]);
+  return out;
+}
+
+const AUDIT_DOLLAR_KEYS = ["income", "taxes", "expenses", "contributions", "surplus"] as const satisfies readonly (keyof CashFlowAuditYear)[];
+
+function roundAuditYear(y: CashFlowAuditYear): CashFlowAuditYear {
+  const out = { ...y };
+  for (const k of AUDIT_DOLLAR_KEYS) out[k] = Math.round(y[k]);
   return out;
 }
 
@@ -497,6 +505,42 @@ export function createServer(session: Session): McpServer {
           deltas[name] = { fi_year_delta: d.fi_year_delta, terminal_delta: Math.round(d.terminal_delta) };
         }
         return { years, series, deltas };
+      }),
+  );
+
+  registerTool(
+    "audit_cash_flow",
+    {
+      description:
+        "Per-year cash-flow audit table for the base plan or a named scenario: income/taxes/expenses/" +
+        "contributions plus `surplus` (income - taxes - expenses - contributions, ~0 in working years " +
+        "under the engine's surplus-spend default) and `flags` — a duplicate income/expense line name " +
+        "repeated within a year, or a fund_from (529-funded) expense whose account fell short, drawing " +
+        "the rest from household cash flow. Pass `from_year`/`to_year` for an explicit inclusive range; " +
+        "omitting both returns a default window sized for a small context window: the first 10 " +
+        "projection years plus retirement_year-1..+2 (deduped, sorted) — call again with an explicit " +
+        "range to see other years.",
+      inputSchema: {
+        scenario: z.string().optional(),
+        from_year: z.number().int().optional(),
+        to_year: z.number().int().optional(),
+      },
+    },
+    ({ scenario, from_year, to_year }) =>
+      guarded(() => {
+        if (from_year !== undefined || to_year !== undefined) {
+          return { years: session.auditCashFlow(scenario, from_year, to_year).map(roundAuditYear) };
+        }
+        const all = session.auditCashFlow(scenario);
+        const retirementYear = session.fiStatus(scenario).retirement_year;
+        const wanted = new Set<number>();
+        for (const y of all.slice(0, 10)) wanted.add(y.year);
+        for (let y = retirementYear - 1; y <= retirementYear + 2; y++) wanted.add(y);
+        const years = all
+          .filter((y) => wanted.has(y.year))
+          .sort((a, b) => a.year - b.year)
+          .map(roundAuditYear);
+        return { years };
       }),
   );
 
