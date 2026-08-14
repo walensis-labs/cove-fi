@@ -57,6 +57,7 @@ const PROJECTION_COLUMNS: Array<{ header: string; key: keyof YearRow }> = [
   { header: "Year", key: "year" },
   { header: "Net Worth", key: "net_worth" },
   { header: "Liquid NW", key: "liquid_net_worth" },
+  { header: "Earmarked", key: "earmarked_net_worth" },
   { header: "Income", key: "income" },
   { header: "Expenses", key: "expenses" },
   { header: "Taxes", key: "taxes" },

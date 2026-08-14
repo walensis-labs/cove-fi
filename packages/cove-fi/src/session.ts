@@ -118,6 +118,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 const DOLLAR_METRICS = [
   "net_worth",
   "liquid_net_worth",
+  "earmarked_net_worth",
   "income",
   "expenses",
   "taxes",

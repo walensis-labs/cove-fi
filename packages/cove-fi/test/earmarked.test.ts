@@ -411,3 +411,61 @@ describe("fund_from drawdown from an earmarked account — existing engine mecha
     expect(sawWithdrawal).toBe(true); // sanity: fund_from actually fired
   });
 });
+
+/**
+ * 0.5.0 Final-fix validation: earmarked_net_worth is now in DOLLAR_METRICS
+ * and gets deflated in ProjectionResult.todays rows, just like net_worth and
+ * other financial metrics. This test verifies the deflation math.
+ */
+describe("session — earmarked_net_worth deflation in ProjectionResult.todays", () => {
+  it("todays[i].earmarked_net_worth = rows[i].earmarked_net_worth / (1+inflation)^(year-start_year); strictly less than nominal for years past start_year", () => {
+    const p = normalizePlan({
+      birth_year: 1990,
+      accounts: [
+        { name: "liquid", tax: "taxable", balance: 100_000, basis: 100_000, growth: 0 },
+        { name: "house_fund", tax: "cash", balance: 50_000, growth: 0.05, earmarked: true },
+      ],
+      incomes: [{ name: "salary", amount: 100_000, start: 2026, end: 2035 }],
+      social_security: [],
+      expenses: [{ name: "living", amount: 40_000, start: 2026, end: 2050 }],
+      contributions: [],
+      house: null,
+      assumptions: {
+        ...DEFAULT_ASSUMPTIONS,
+        start_year: 2026,
+        end_year: 2040,
+        retirement_year: 2050,
+        inflation: 0.03, // 3% inflation to make deflation visible
+        ret: 0.07,
+      },
+    });
+
+    const session = new Session();
+    session.plan = p;
+    const result = session.runProjection(undefined);
+
+    // Find a mid-horizon row (year 2028, which is 2 years after start_year 2026)
+    const midRow = result.rows.find((r) => r.year === 2028);
+    const midTodays = result.todays.find((r) => r.year === 2028);
+    expect(midRow).toBeDefined();
+    expect(midTodays).toBeDefined();
+
+    // Deflation factor: (1 + 0.03)^(2028 - 2026) = 1.03^2 ≈ 1.0609
+    const inflation = 0.03;
+    const yearsDiff = 2028 - 2026;
+    const deflateFactor = (1 + inflation) ** yearsDiff;
+
+    // Check that todays value is the nominal value deflated
+    const expectedTodays = midRow!.earmarked_net_worth / deflateFactor;
+    expect(midTodays!.earmarked_net_worth).toBeCloseTo(expectedTodays, 6);
+
+    // Check that todays value is strictly less than the nominal value
+    // (because inflation > 0 and year > start_year)
+    expect(midTodays!.earmarked_net_worth).toBeLessThan(midRow!.earmarked_net_worth);
+
+    // Also check the first year (start_year) should have no deflation (factor = 1)
+    const startRow = result.rows.find((r) => r.year === 2026);
+    const startTodays = result.todays.find((r) => r.year === 2026);
+    expect(startTodays!.earmarked_net_worth).toBeCloseTo(startRow!.earmarked_net_worth, 6);
+  });
+});
