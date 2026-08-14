@@ -380,7 +380,9 @@ export function createServer(session: Session): McpServer {
         "Define a named scenario from override deltas and return its FI status. `overrides.class_returns` " +
         "replaces assumptions.class_returns WHOLESALE (not a per-key merge) and only affects deterministic " +
         "projections (run_projection/fi_status/compare_scenarios) — monte_carlo ignores invested return " +
-        "overrides (its rates schedule dominates ret/class_returns for every account).",
+        "overrides (its rates schedule dominates ret/class_returns for every account). " +
+        "`overrides.contributions.keep` exempts rungs from the contributions override only " +
+        "(its own scale/end); savings_rate_multiplier still applies to kept rungs.",
       // Permissive on purpose — see the comment above scenarioOverridesStrict.
       inputSchema: { name: z.string(), overrides: z.object(scenarioOverridesShape).catchall(z.unknown()) },
     },

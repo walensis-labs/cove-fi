@@ -284,9 +284,94 @@ describe("applyOverrides — contributions {end, keep, scale}", () => {
     expect(session.plan).toEqual(plan);
   });
 
-  it("composes with savings_rate_multiplier: multiplier 0.5 then scale 0.5 => non-kept amounts x0.25", () => {
+  it("atomicity: a bad keep name thrown AFTER savings_rate_multiplier already mutated the draft still leaves the session plan intact", () => {
+    // savings_rate_multiplier runs first in applyOverrides and rewrites
+    // copy.contributions[0].amount before the contributions block even
+    // resolves `keep` — this pins that the throw still unwinds cleanly
+    // (copy is a local structuredClone; the session's plan was never
+    // touched regardless of how much of `copy` got mutated first).
+    const plan = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000, name: "alpha" }]);
+    const session = new Session();
+    session.plan = plan;
+    session.defineScenario("bad", { savings_rate_multiplier: 0.5, contributions: { keep: ["nonexistent"] } });
+    expect(() => session.runProjection("bad")).toThrowError(/nonexistent/);
+    expect(session.plan).toEqual(plan);
+    // session isn't left wedged — a valid scenario still runs afterward.
+    session.defineScenario("good", { savings_rate_multiplier: 0.5 });
+    expect(() => session.runProjection("good")).not.toThrow();
+  });
+
+  it("composes with savings_rate_multiplier: multiplier 0.5 then scale 0.5 => non-kept amounts x0.25, pinned via engine output", () => {
     const plan = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000 }]);
     const out = applyOverrides(plan, { savings_rate_multiplier: 0.5, contributions: { scale: 0.5 } });
-    expect(out.contributions[0]!.amount).toBeCloseTo(10_000 * 0.25, 6);
+    const { rows } = runWithMeta(out);
+    const contribByYear = new Map(rows.map((r) => [r.year, r.contributions]));
+    for (let y = 2026; y <= 2032; y++) {
+      expect(contribByYear.get(y)).toBeCloseTo(10_000 * 0.25, 6);
+    }
+  });
+
+  it("keep scopes to the contributions override only — savings_rate_multiplier still applies to kept rungs (pinned via engine output)", () => {
+    // Controller ruling on the spec-silent fork: `keep` exempts a rung from
+    // `contributions.scale`/`.end` only. savings_rate_multiplier is a
+    // blanket knob that predates `keep` and models overall savings
+    // behavior — it still touches every rung, kept or not.
+    const overrides = { savings_rate_multiplier: 0.5, contributions: { scale: 0.5, keep: ["x"] } };
+
+    // Isolate the kept rung first: a plan containing ONLY "x" (kept) — its
+    // engine-output contribution should reflect the multiplier alone.
+    const keptOnly = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000, name: "x" }]);
+    const keptYear1 = runWithMeta(applyOverrides(keptOnly, overrides)).rows.find((r) => r.year === 2026)!
+      .contributions;
+    expect(keptYear1).toBeCloseTo(10_000 * 0.5, 6); // multiplier only — kept exempts contributions.scale
+
+    // Now add a second, non-kept named rung "y" to the SAME plan and apply
+    // the SAME override call — the summed contributions column must equal
+    // "x"'s already-pinned 5,000 plus "y"'s multiplier-then-scale 2,500,
+    // proving `keep` scoped its exemption to "x" alone within one call.
+    const both = buildPlan([
+      { account: "A", start: 2026, end: 2091, amount: 10_000, name: "x" },
+      { account: "B", start: 2026, end: 2091, amount: 10_000, name: "y" },
+    ]);
+    const combinedYear1 = runWithMeta(applyOverrides(both, overrides)).rows.find((r) => r.year === 2026)!
+      .contributions;
+    expect(combinedYear1).toBeCloseTo(keptYear1 + 10_000 * 0.25, 6); // x (multiplier only) + y (multiplier, then scale)
+  });
+
+  it("triple chain: to_limit + savings_rate_multiplier 0.5 + contributions.scale 0.5 => engine contributes limit x 0.25 x first_year_fraction in year 1", () => {
+    // savings_rate_multiplier converts the to_limit rung to a fixed
+    // amount = IRS_LIMITS_2026["401k"] * 0.5 and drops to_limit (see the
+    // savings_rate_multiplier tests above); contributions.scale then sees
+    // an ordinary (non-to_limit) rung and multiplies that amount by 0.5
+    // again => amount = limit * 0.25, in 2026 dollars. The engine's `want`
+    // for an amount rung is `c.amount * f * frac`; at y === start_year, f
+    // is always 1.0 (engine.ts only accumulates it for y > start_year) and
+    // frac === first_year_fraction (0.5 here, to actually exercise the
+    // factor rather than have it default away to 1.0). So year-1
+    // want = limit * 0.25 * 1.0 * 0.5 = limit * 0.125, and $1,000,000 of
+    // income leaves ample `available` cash flow so amt === want exactly.
+    const firstYearFraction = 0.5;
+    const plan = normalizePlan({
+      birth_year: 1990,
+      accounts: [{ name: "A", tax: "taxable", balance: 0, growth: 0 }],
+      incomes: [{ name: "salary", amount: 1_000_000, start: 2026, end: 2091 }],
+      social_security: [],
+      expenses: [{ name: "living", amount: 40_000, start: 2026, end: 2091 }],
+      contributions: [{ account: "A", start: 2026, end: 2091, to_limit: true, annual_limit_key: "401k" }],
+      house: null,
+      assumptions: {
+        ...DEFAULT_ASSUMPTIONS,
+        start_year: 2026,
+        end_year: 2028,
+        retirement_year: 2091,
+        inflation: 0,
+        ret: 0,
+        first_year_fraction: firstYearFraction,
+      },
+    });
+    const out = applyOverrides(plan, { savings_rate_multiplier: 0.5, contributions: { scale: 0.5 } });
+    const year1 = runWithMeta(out).rows.find((r) => r.year === 2026)!;
+    const expected = IRS_LIMITS_2026["401k"] * 0.25 * firstYearFraction;
+    expect(year1.contributions).toBeCloseTo(expected, 4);
   });
 });
