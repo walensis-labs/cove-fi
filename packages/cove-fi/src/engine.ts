@@ -305,24 +305,43 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
     }
 
     // ---------- income ----------
-    let gross = 0.0;
-    let taxableGross = 0.0;
+    // 0.6.0: gross-up split. `net: true` incomes carry a TAKE-HOME amount
+    // (already taxed) rather than gross — grossing one up requires `pretax`
+    // (the pretax-contribution rung total), which only exists inside the
+    // tax<->pretax convergence loop below. So the constant, gross-declared
+    // part accumulates here as always, and the net-derived part is a
+    // function of `pretax`, recomputed each iteration of that loop (and
+    // once more after it converges — see grossFromNet call sites below).
+    let grossDeclared = 0.0;
+    let taxableGrossDeclared = 0.0;
+    let netTotal = 0.0; // net-flagged incomes (always taxable)
     for (const i of incomes) {
       if (i.start <= y && y <= i.end) {
         const amt = i.amount * f * frac;
-        gross += amt;
-        if (i.taxable !== false) {
-          taxableGross += amt;
+        if (i.net === true) {
+          netTotal += amt;
+        } else {
+          grossDeclared += amt;
+          if (i.taxable !== false) {
+            taxableGrossDeclared += amt;
+          }
         }
       }
     }
+    if (netTotal > 0 && ordRate >= 1) {
+      throw new Error("cannot gross up net income: income_tax + local_tax must be < 1");
+    }
+    // pretax-dependent part (working years only — retirement applies no
+    // ordinary tax, so there's nothing to gross up there; see below).
+    const grossFromNet = (pretaxNow: number) => (netTotal > 0 ? netTotal / (1 - ordRate) + pretaxNow : 0);
+    let gross = 0.0;
+    let taxableGross = 0.0;
     let ssGross = 0.0;
     for (const ss of plan.social_security) {
       if (y >= ss.claim_year) {
         ssGross += ss.pia_monthly * 12 * (ss.haircut ?? 1.0) * f;
       }
     }
-    row.income = gross + ssGross;
 
     // ---------- explicit expenses ----------
     let exp = 0.0;
@@ -374,6 +393,9 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
     let taxes: number;
     if (y <= lastWorkYear) {
       for (let iter = 0; iter < 4; iter++) {
+        const fromNet = grossFromNet(pretax);
+        gross = grossDeclared + fromNet;
+        taxableGross = taxableGrossDeclared + fromNet;
         taxes = Math.max(taxableGross - pretax, 0.0) * ordRate;
         let available = gross - taxes - exp;
         const newContribs: Map<string, number> = new Map();
@@ -430,6 +452,13 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
         matches = newMatches;
         pretax = newPretax;
       }
+      // Recompute once more with the final, converged `pretax` — the loop
+      // may break (or exhaust) on an iteration whose gross/taxableGross
+      // were derived from the PRIOR iteration's pretax, so this last pass
+      // is the one whose figures are actually reported.
+      const fromNet = grossFromNet(pretax);
+      gross = grossDeclared + fromNet;
+      taxableGross = taxableGrossDeclared + fromNet;
       taxes = Math.max(taxableGross - pretax, 0.0) * ordRate;
       let contribSum = 0.0;
       for (const v of contribs.values()) {
@@ -446,7 +475,14 @@ export function runWithMeta(plan: Plan, overrides?: Partial<Assumptions>, rates?
         }
       }
       row.contributions = contribSum;
+      row.income = gross + ssGross;
     } else {
+      // Retirement branch: no ordinary tax applied here (taxes = 0 for
+      // ordinary income; SS and cash-interest/dividend taxes are handled
+      // below/elsewhere), so there's nothing to gross a net income up
+      // against — report it at face value.
+      gross = grossDeclared + netTotal;
+      row.income = gross + ssGross;
       taxes = 0.0;
     }
 
