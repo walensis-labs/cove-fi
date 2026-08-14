@@ -10,7 +10,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { run, runWithMeta } from "../src/engine.js";
-import { COAST, DEFAULT_ASSUMPTIONS, normalizePlan, type Plan } from "../src/model.js";
+import { COAST, DEFAULT_ASSUMPTIONS, IRS_LIMITS_2026, normalizePlan, type Contribution, type Plan } from "../src/model.js";
+import { applyOverrides, Session } from "../src/session.js";
 
 describe("Contribution.hard_end — engine guard", () => {
   // Reuses the exact plan shape from coast.test.ts's "COAST-rung
@@ -148,5 +149,144 @@ describe("pretax-stop: stopping a pretax rung natively returns amount x (1 - rat
     const deltaExpenses = byYear.get(2028)!.expenses - byYear.get(2027)!.expenses;
     expect(deltaTaxes).toBeCloseTo(10_000 * 0.31, 6);
     expect(deltaExpenses).toBeCloseTo(10_000 * (1 - 0.31), 6);
+  });
+});
+
+/**
+ * 0.5.0 Task 4: applyOverrides — contributions {end, keep, scale}.
+ *
+ * Income is set high ($1,000,000/yr) so `available` cash flow never binds
+ * `amt = min(want, available)` — every rung contributes exactly `want`,
+ * making the contributions column a direct readout of each rung's
+ * post-override amount. Single-rung plans isolate one rung's behavior in
+ * the `contributions` column; ret/inflation are 0 so amounts don't drift
+ * across years.
+ */
+describe("applyOverrides — contributions {end, keep, scale}", () => {
+  function buildPlan(contributions: Contribution[], endYear = 2032): Plan {
+    return normalizePlan({
+      birth_year: 1990,
+      accounts: [
+        { name: "A", tax: "taxable", balance: 0, growth: 0 },
+        { name: "B", tax: "taxable", balance: 0, growth: 0 },
+      ],
+      incomes: [{ name: "salary", amount: 1_000_000, start: 2026, end: 2091 }],
+      social_security: [],
+      expenses: [{ name: "living", amount: 40_000, start: 2026, end: 2091 }],
+      contributions,
+      house: null,
+      assumptions: {
+        ...DEFAULT_ASSUMPTIONS,
+        start_year: 2026,
+        end_year: endYear,
+        retirement_year: 2091,
+        inflation: 0,
+        ret: 0,
+      },
+    });
+  }
+
+  it("keep-exempts-both: a kept rung contributes past the clamp at full amount", () => {
+    const plan = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000, name: "keepme" }]);
+    const out = applyOverrides(plan, { contributions: { keep: ["keepme"], scale: 0.5, end: 2027 } });
+    // Kept rung is byte-untouched — same object shape as the input's rung.
+    expect(out.contributions[0]).toEqual(plan.contributions[0]);
+    const { rows } = runWithMeta(out);
+    const contribByYear = new Map(rows.map((r) => [r.year, r.contributions]));
+    for (let y = 2026; y <= 2032; y++) {
+      expect(contribByYear.get(y)).toBeCloseTo(10_000, 6); // never scaled, never clamped
+    }
+  });
+
+  it("scale-then-clamp order pinned: scale 0.5 + end — half-amounts until end, zero after", () => {
+    const plan = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000 }]);
+    const out = applyOverrides(plan, { contributions: { scale: 0.5, end: 2027 } });
+    const { rows } = runWithMeta(out);
+    const contribByYear = new Map(rows.map((r) => [r.year, r.contributions]));
+    expect(contribByYear.get(2026)).toBeCloseTo(5_000, 6);
+    expect(contribByYear.get(2027)).toBeCloseTo(5_000, 6);
+    expect(contribByYear.get(2028)).toBe(0);
+    expect(contribByYear.get(2030)).toBe(0);
+  });
+
+  it("end never extends: a rung with its own end 2030 still stops at 2030 despite override end 2035", () => {
+    const plan = buildPlan([{ account: "A", start: 2026, end: 2030, amount: 10_000 }]);
+    const out = applyOverrides(plan, { contributions: { end: 2035 } });
+    expect(out.contributions[0]!.hard_end).toBe(2035); // tightened per the formula...
+    const { rows } = runWithMeta(out);
+    const contribByYear = new Map(rows.map((r) => [r.year, r.contributions]));
+    for (let y = 2026; y <= 2030; y++) expect(contribByYear.get(y)).toBeCloseTo(10_000, 6);
+    // ...but the rung's own `end` still governs — hard_end can only tighten, never extend.
+    for (let y = 2031; y <= 2032; y++) expect(contribByYear.get(y)).toBe(0);
+  });
+
+  it("unknown keep name throws, naming it (unnamed rungs can never be kept)", () => {
+    const named = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000, name: "alpha" }]);
+    expect(() => applyOverrides(named, { contributions: { keep: ["bravo"] } })).toThrowError(/bravo/);
+
+    const unnamed = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000 }]);
+    expect(() => applyOverrides(unnamed, { contributions: { keep: ["anything"] } })).toThrowError(/anything/);
+  });
+
+  it("scale 0 + no end = never-contributed counterfactual (contributions column all zero)", () => {
+    const plan = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000 }]);
+    const out = applyOverrides(plan, { contributions: { scale: 0 } });
+    const { rows } = runWithMeta(out);
+    for (const r of rows) expect(r.contributions).toBe(0);
+  });
+
+  it("scale also converts a to_limit rung to a fixed amount = IRS limit x scale, dropping to_limit", () => {
+    const plan = buildPlan([
+      { account: "A", start: 2026, end: 2091, to_limit: true, annual_limit_key: "401k" },
+    ]);
+    const out = applyOverrides(plan, { contributions: { scale: 0.5 } });
+    expect(out.contributions[0]!.to_limit).toBe(false);
+    expect(out.contributions[0]!.amount).toBeCloseTo(IRS_LIMITS_2026["401k"] * 0.5);
+  });
+
+  it("validates scale (finite >= 0), end (finite integer), and keep (array of strings)", () => {
+    const plan = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000, name: "alpha" }]);
+    expect(() => applyOverrides(plan, { contributions: { scale: -1 } })).toThrow();
+    expect(() => applyOverrides(plan, { contributions: { scale: Number.NaN } })).toThrow();
+    expect(() => applyOverrides(plan, { contributions: { scale: Number.POSITIVE_INFINITY } })).toThrow();
+    expect(() => applyOverrides(plan, { contributions: { end: 2027.5 } })).toThrow();
+    expect(() => applyOverrides(plan, { contributions: { end: Number.NaN } })).toThrow();
+    expect(() => applyOverrides(plan, { contributions: { keep: [42] as unknown as string[] } })).toThrow();
+  });
+
+  it("purity: never mutates a deep-frozen input plan", () => {
+    function deepFreeze<T>(v: T): T {
+      if (v !== null && (typeof v === "object" || Array.isArray(v))) {
+        for (const k of Object.keys(v as object)) {
+          deepFreeze((v as Record<string, unknown>)[k]);
+        }
+        Object.freeze(v);
+      }
+      return v;
+    }
+    const frozen = deepFreeze(
+      buildPlan([
+        { account: "A", start: 2026, end: 2091, amount: 10_000, name: "keepme" },
+        { account: "B", start: 2026, end: 2091, amount: 20_000 },
+      ]),
+    );
+    expect(() =>
+      applyOverrides(frozen, { contributions: { keep: ["keepme"], scale: 0.5, end: 2027 } }),
+    ).not.toThrow();
+  });
+
+  it("atomicity: an invalid contributions override leaves the session plan intact and throws", () => {
+    const plan = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000, name: "alpha" }]);
+    const session = new Session();
+    session.plan = plan;
+    session.defineScenario("bad", { contributions: { scale: -1 } });
+    expect(() => session.runProjection("bad")).toThrow();
+    expect(session.plan).toEqual(plan);
+  });
+
+  it("composes with savings_rate_multiplier: multiplier 0.5 then scale 0.5 => non-kept amounts x0.25", () => {
+    const plan = buildPlan([{ account: "A", start: 2026, end: 2091, amount: 10_000 }]);
+    const out = applyOverrides(plan, { savings_rate_multiplier: 0.5, contributions: { scale: 0.5 } });
+    expect(out.contributions[0]!.amount).toBeCloseTo(10_000 * 0.25, 6);
   });
 });
