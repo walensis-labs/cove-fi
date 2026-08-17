@@ -11,16 +11,19 @@
  */
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { RegisteredTool, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { AnySchema, ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { CITED_DEFAULTS } from "../defaults.js";
 import { type YearRow } from "../engine.js";
+import { METRIC_DEFINITIONS, METRICS_VERSION } from "../metrics.js";
 import { type Assumptions, DEFAULT_ASSUMPTIONS, type TaxType } from "../model.js";
 import { isValidRet, RET_MAX, RET_MIN } from "../planjson.js";
 import { listPlans, resolvePlanRef } from "../planstore.js";
 import { seedFromYnab } from "../seed/ynab.js";
-import { type FiStatus, Session } from "../session.js";
+import { type CashFlowAuditYear, type FiStatus, Session } from "../session.js";
 import { thinIndices, thinMonteCarloResult, thinRows } from "../thin.js";
 
 // ---------------------------------------------------------------------
@@ -68,6 +71,14 @@ const DOLLAR_ROW_KEYS = [
 function roundRow(row: YearRow): YearRow {
   const out = { ...row };
   for (const k of DOLLAR_ROW_KEYS) out[k] = Math.round(row[k]);
+  return out;
+}
+
+const AUDIT_DOLLAR_KEYS = ["income", "taxes", "expenses", "contributions", "surplus"] as const satisfies readonly (keyof CashFlowAuditYear)[];
+
+function roundAuditYear(y: CashFlowAuditYear): CashFlowAuditYear {
+  const out = { ...y };
+  for (const k of AUDIT_DOLLAR_KEYS) out[k] = Math.round(y[k]);
   return out;
 }
 
@@ -251,7 +262,33 @@ const PACKAGE_VERSION: string = readPackageVersion();
 export function createServer(session: Session): McpServer {
   const server = new McpServer({ name: "cove-fi", version: PACKAGE_VERSION });
 
-  server.registerTool(
+  // Capabilities for get_engine_info are collected here, not hand-listed:
+  // every tool below is registered through this local wrapper (instead of
+  // calling server.registerTool directly), so `toolNames` can never drift
+  // from what's actually reachable on this server instance. Scoped per
+  // createServer() call (not module-level) so repeated server instances in
+  // tests don't accumulate stale names across instances.
+  const toolNames: string[] = [];
+  function registerTool<
+    OutputArgs extends ZodRawShapeCompat | AnySchema,
+    InputArgs extends undefined | ZodRawShapeCompat | AnySchema = undefined,
+  >(
+    name: string,
+    config: {
+      title?: string;
+      description?: string;
+      inputSchema?: InputArgs;
+      outputSchema?: OutputArgs;
+      annotations?: ToolAnnotations;
+      _meta?: Record<string, unknown>;
+    },
+    handler: ToolCallback<InputArgs>,
+  ): RegisteredTool {
+    toolNames.push(name);
+    return server.registerTool(name, config, handler);
+  }
+
+  registerTool(
     "load_plan",
     {
       description:
@@ -266,7 +303,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "list_plans",
     {
       description:
@@ -283,21 +320,21 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "create_plan",
     {
       description:
-        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars). Growth overrides: an account's `ret` and `assumptions.class_returns.<tax-class>` (both finite, in [-0.5, 0.5]) let you set nominal return by account or by tax class, falling back to `assumptions.ret` when unset. A contribution's `name` (unique among named rungs) lets `run_scenario`'s `overrides.contributions.keep` target it by name, and its `hard_end` caps it at a plain calendar year independent of `end`. An account's `earmarked: true` (implies `liquid: false`) excludes its balance from `net_worth`/the retirement drawdown waterfall and reports it separately as `earmarked_net_worth`.",
+        "Create a new plan in the session from a JSON object (accounts/incomes/social_security/expenses/contributions/assumptions/etc). Validates the shape and returns a summary; validation issues are reported in the error text (amounts are annual, today's dollars). Income `amount` values must be GROSS annual dollars — confirm with the user whether a reported income figure is gross or take-home (and convert take-home with `income_gross_from_net`) before using it here. Growth overrides: an account's `ret` and `assumptions.class_returns.<tax-class>` (both finite, in [-0.5, 0.5]) let you set nominal return by account or by tax class, falling back to `assumptions.ret` when unset. A contribution's `name` (unique among named rungs) lets `run_scenario`'s `overrides.contributions.keep` target it by name, and its `hard_end` caps it at a plain calendar year independent of `end`. An account's `earmarked: true` (implies `liquid: false`) excludes its balance from `net_worth`/the retirement drawdown waterfall and reports it separately as `earmarked_net_worth`.",
       inputSchema: { plan: z.record(z.unknown()) },
     },
     ({ plan }) => guarded(() => session.createPlan(plan)),
   );
 
-  server.registerTool(
+  registerTool(
     "update_plan",
     {
       description:
-        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions` — note `set.assumptions.class_returns`, being one key of that shallow merge, is replaced WHOLESALE, not merged per tax-class). At least one of `add`/`set` is required (amounts are annual, today's dollars). Appended contributions may carry `name` (unique among named rungs — targetable by `run_scenario`'s `overrides.contributions.keep`) and `hard_end` (a plain calendar year cap independent of `end`); appended accounts may carry `earmarked: true` to exclude the balance from `net_worth` and report it under `earmarked_net_worth` instead.",
+        "Patch the session's current plan: `add` appends to array fields (accounts/incomes/expenses/contributions), `set` replaces top-level fields (and shallow-merges `assumptions` — note `set.assumptions.class_returns`, being one key of that shallow merge, is replaced WHOLESALE, not merged per tax-class). At least one of `add`/`set` is required (amounts are annual, today's dollars). Income `amount` values must be GROSS annual dollars — confirm with the user whether a reported income figure is gross or take-home (and convert take-home with `income_gross_from_net`) before using it here. Appended contributions may carry `name` (unique among named rungs — targetable by `run_scenario`'s `overrides.contributions.keep`) and `hard_end` (a plain calendar year cap independent of `end`); appended accounts may carry `earmarked: true` to exclude the balance from `net_worth` and report it under `earmarked_net_worth` instead.",
       inputSchema: {
         add: z.record(z.unknown()).optional(),
         set: z.record(z.unknown()).optional(),
@@ -312,7 +349,7 @@ export function createServer(session: Session): McpServer {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "save_plan",
     {
       description: "Persist the session's current plan to the plan store under `name`.",
@@ -325,7 +362,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "get_assumptions",
     {
       description:
@@ -339,7 +376,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "set_assumption",
     {
       description:
@@ -365,7 +402,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "run_projection",
     {
       description: "Run the base plan or a named scenario; returns a thinned, rounded year-by-year projection.",
@@ -379,20 +416,21 @@ export function createServer(session: Session): McpServer {
           rows: thinRows(rows, fi.retirement_year).map(roundRow),
           todays: thinRows(todays, fi.retirement_year).map(roundRow),
           fi,
+          metrics_version: METRICS_VERSION,
         };
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "fi_status",
     {
       description: "Return FI/coast/depletion year status for the base plan or a named scenario.",
       inputSchema: { scenario: z.string().optional() },
     },
-    ({ scenario }) => guarded(() => roundFiStatus(session.fiStatus(scenario))),
+    ({ scenario }) => guarded(() => ({ ...roundFiStatus(session.fiStatus(scenario)), metrics_version: METRICS_VERSION })),
   );
 
-  server.registerTool(
+  registerTool(
     "run_scenario",
     {
       description:
@@ -422,7 +460,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "monte_carlo",
     {
       description:
@@ -441,7 +479,7 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
     "compare_scenarios",
     {
       description: "Compare previously-defined scenarios by name against the first as baseline.",
@@ -470,7 +508,43 @@ export function createServer(session: Session): McpServer {
       }),
   );
 
-  server.registerTool(
+  registerTool(
+    "audit_cash_flow",
+    {
+      description:
+        "Per-year cash-flow audit table for the base plan or a named scenario: income/taxes/expenses/" +
+        "contributions plus `surplus` (income - taxes - expenses - contributions, ~0 in working years " +
+        "under the engine's surplus-spend default) and `flags` — a duplicate income/expense line name " +
+        "repeated within a year, or a fund_from (529-funded) expense whose account fell short, drawing " +
+        "the rest from household cash flow. Pass `from_year`/`to_year` for an explicit inclusive range; " +
+        "omitting both returns a default window sized for a small context window: the first 10 " +
+        "projection years plus retirement_year-1..+2 (deduped, sorted) — call again with an explicit " +
+        "range to see other years.",
+      inputSchema: {
+        scenario: z.string().optional(),
+        from_year: z.number().int().optional(),
+        to_year: z.number().int().optional(),
+      },
+    },
+    ({ scenario, from_year, to_year }) =>
+      guarded(() => {
+        if (from_year !== undefined || to_year !== undefined) {
+          return { years: session.auditCashFlow(scenario, from_year, to_year).map(roundAuditYear) };
+        }
+        const all = session.auditCashFlow(scenario);
+        const retirementYear = session.fiStatus(scenario).retirement_year;
+        const wanted = new Set<number>();
+        for (const y of all.slice(0, 10)) wanted.add(y.year);
+        for (let y = retirementYear - 1; y <= retirementYear + 2; y++) wanted.add(y);
+        const years = all
+          .filter((y) => wanted.has(y.year))
+          .sort((a, b) => a.year - b.year)
+          .map(roundAuditYear);
+        return { years };
+      }),
+  );
+
+  registerTool(
     "seed_from_ynab",
     {
       description:
@@ -479,10 +553,96 @@ export function createServer(session: Session): McpServer {
         "savings rate over the last 6 complete months. Never touches the loaded plan; the caller " +
         "must confirm with the user and pass values into create_plan/update_plan by hand. If no " +
         "token is set, returns `{ configured: false, instructions }` (not an error). Seeded " +
-        "figures are MONTHLY; multiply ×12 when building plan entries.",
+        "figures are MONTHLY; multiply ×12 when building plan entries. NOTE: YNAB-derived income " +
+        "is TAKE-HOME (post-tax deposits) — convert it with `income_gross_from_net` before it " +
+        "enters a plan; cove-fi plans always store GROSS income.",
       inputSchema: { budget_id: z.string().optional() },
     },
     ({ budget_id }) => guarded(() => seedFromYnab(budget_id === undefined ? undefined : { budgetId: budget_id })),
+  );
+
+  registerTool(
+    "income_gross_from_net",
+    {
+      description:
+        "PROPOSE-ONLY calculator (never touches the loaded plan): given a take-home (post-tax) " +
+        "annual figure, computes the GROSS annual salary that would produce it — " +
+        "`gross = net / (1 - (income_tax + local_tax)) + deferrals`. Plans always store GROSS " +
+        "income; use this before passing a take-home number (e.g. from a pay stub or YNAB " +
+        "deposits) into create_plan/update_plan. `income_tax`/`local_tax` default to the loaded " +
+        "plan's assumptions when omitted (an error if no plan is loaded and either is omitted). " +
+        "Pass `stated_gross` to reconcile a self-reported gross figure against the computed one — " +
+        "the response's `reconciliation.agrees` is true when they're within 1% of each other.",
+      inputSchema: {
+        net_annual: z.number().positive(),
+        deferrals_annual: z.number().min(0).default(0),
+        income_tax: z.number().min(0).max(1).optional(),
+        local_tax: z.number().min(0).max(1).optional(),
+        stated_gross: z.number().positive().optional(),
+      },
+    },
+    ({ net_annual, deferrals_annual, income_tax, local_tax, stated_gross }) =>
+      guarded(() => {
+        if (income_tax === undefined || local_tax === undefined) {
+          if (!session.plan) {
+            throw new Error("income_tax and local_tax are required when no plan is loaded");
+          }
+          income_tax ??= session.plan.assumptions.income_tax;
+          local_tax ??= session.plan.assumptions.local_tax;
+        }
+        const ordinaryRateUsed = income_tax + local_tax;
+        if (ordinaryRateUsed >= 1) {
+          throw new Error("income_tax + local_tax must be < 1");
+        }
+        const computedGross = Math.round(net_annual / (1 - ordinaryRateUsed) + deferrals_annual);
+        const result: {
+          computed_gross: number;
+          net_annual: number;
+          deferrals_annual: number;
+          ordinary_rate_used: number;
+          formula: string;
+          reconciliation?: { stated_gross: number; computed_gross: number; delta: number; agrees: boolean };
+        } = {
+          computed_gross: computedGross,
+          net_annual: Math.round(net_annual),
+          deferrals_annual: Math.round(deferrals_annual),
+          ordinary_rate_used: ordinaryRateUsed,
+          formula: "gross = net / (1 - (income_tax + local_tax)) + deferrals",
+        };
+        if (stated_gross !== undefined) {
+          const roundedStated = Math.round(stated_gross);
+          const delta = computedGross - roundedStated;
+          result.reconciliation = {
+            stated_gross: roundedStated,
+            computed_gross: computedGross,
+            delta,
+            agrees: Math.abs(delta) <= 0.01 * roundedStated,
+          };
+        }
+        return result;
+      }),
+  );
+
+  registerTool(
+    "get_engine_info",
+    {
+      description:
+        "Handshake tool: reports the running server's version, metrics_version, the live " +
+        "run_scenario override key list, metric definitions, and every registered tool name " +
+        "(capabilities). Call this first in a new session — no plan needs to be loaded — to " +
+        "detect a stale or partial deploy before trusting any other tool's numbers, and to " +
+        "check metrics_version whenever a cached metric value (e.g. coast_year) needs to be " +
+        "revalidated against its current definition.",
+      inputSchema: {},
+    },
+    () =>
+      guarded(() => ({
+        version: PACKAGE_VERSION,
+        metrics_version: METRICS_VERSION,
+        scenario_override_keys: SCENARIO_OVERRIDE_KEYS,
+        metric_definitions: METRIC_DEFINITIONS,
+        capabilities: [...toolNames],
+      })),
   );
 
   server.registerPrompt(
@@ -514,7 +674,7 @@ const ONBOARD_PROMPT = `You are guiding the user through setting up a Cove FI re
 3. Run a manual interview to collect whatever seeding didn't cover (birth years, account balances, and contributions are never in the seed proposal — always ask for these; other sections may already be confirmed from step 2). Ask one section at a time, in this fixed order:
    - Household: who's included, and birth year(s).
    - Accounts & balances: name, \`tax\` (one of \`cash\`|\`taxable\`|\`trad\`|\`roth\`|\`hsa\`|\`529\`), balance, and cost basis where relevant.
-   - Income streams: source, amount, and timing.
+   - Income streams: source, amount, and timing. Cove FI plans always store GROSS (pre-tax) annual income — never assume a reported figure is gross. For EVERY income figure, first establish whether it's take-home (post-tax, e.g. a paycheck deposit or YNAB-derived amount) or already gross. If take-home: convert any reported period to annual (a monthly figure ×12), then ask for ALL annual pretax deferrals (401k, HSA, insurance premiums, etc — these can never be inferred from a deposit amount), then call \`income_gross_from_net\`. Read back the full chain to the user — the reported figure (with its period), the annualized net, the deferrals, and the computed gross — for explicit confirmation before you call \`create_plan\` or \`update_plan\` with it.
    - Social Security (optional): ask if the user wants to include SS benefits; if so, collect \`pia_monthly\` and \`claim_year\` for each person.
    - Recurring expenses & housing.
    - Contributions & savings rungs (what gets funded, in what order).

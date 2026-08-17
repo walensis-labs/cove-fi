@@ -41,7 +41,7 @@
  * `retirement_year` override here moves that income's end date too.
  */
 import { readFileSync } from "node:fs";
-import { coastTargetAtRetirement, run, runWithMeta, type YearRow } from "./engine.js";
+import { coastTargetAtRetirement, run, runWithMeta, type YearDetail, type YearRow } from "./engine.js";
 import {
   type Assumptions,
   type ClassReturns,
@@ -95,6 +95,68 @@ export interface FiStatus {
 export interface ProjectionResult {
   rows: YearRow[];
   todays: YearRow[]; // todays = each metric / (1+inflation)^(y-start)
+}
+
+// 0.6.0: the per-year "is this account really funding that gift?" table —
+// built over runWithMeta's opt-in YearDetail, one entry per row in range.
+// `surplus` makes fungibility questions answerable: it's the household's
+// own identity (income - taxes - expenses - contributions), computed from
+// the SAME row totals YearDetail reconciles to, so it's exactly 0 (modulo
+// float noise) whenever cashFlowDefault: "spend" absorbed every dollar —
+// which is every working year by construction (engine.ts folds any surplus
+// into `exp` as a synthetic "Discretionary" line before the row is
+// finalized). A nonzero surplus in a returned year is not a bug signal by
+// itself (retirement years draw down accounts instead of spending a
+// working-year surplus), it's just the number this tool exists to show.
+export interface CashFlowAuditYear {
+  year: number;
+  income: number;
+  taxes: number;
+  expenses: number;
+  contributions: number;
+  surplus: number; // income - taxes - expenses - contributions
+  flags: string[];
+}
+
+/** Whole-dollar, comma-grouped formatting for flag message text — flag
+ * strings bake in their own rounded figures (they're prose, not a
+ * DOLLAR_METRICS-style numeric field a caller could round after the fact). */
+function fmtDollars(n: number): string {
+  return Math.round(n).toLocaleString("en-US");
+}
+
+/** Any NAME appearing more than once among a year's income or expense lines
+ * (YearDetail, so synthetic engine lines are included — they're always
+ * single-instance by construction and can't false-positive, but a user's
+ * own expense colliding with a synthetic name, e.g. "Mortgage (P&I)", is a
+ * real duplicate worth flagging, not a case to special-case away). */
+function duplicateNameFlags(lines: { name: string }[], kind: "income" | "expense"): string[] {
+  const counts = new Map<string, number>();
+  for (const l of lines) counts.set(l.name, (counts.get(l.name) ?? 0) + 1);
+  const flags: string[] = [];
+  for (const [name, n] of counts) {
+    if (n > 1) flags.push(`duplicate ${kind} line '${name}' appears ${n}x`);
+  }
+  return flags;
+}
+
+/** A fund_from expense line only ever appears in YearDetail.expenses when
+ * its fallthrough (funded_from_cash_flow, === amount) is nonzero — a
+ * fully-covered fund_from expense is omitted entirely (see engine.ts's
+ * YearDetail doc) — so every fund_from-tagged entry here IS a shortfall by
+ * construction; the funded_from_cash_flow > 0 check is kept explicit to
+ * document that invariant rather than lean on it silently. */
+function fundFromShortfallFlags(expenses: YearDetail["expenses"]): string[] {
+  const flags: string[] = [];
+  for (const e of expenses) {
+    if (e.fund_from && e.funded_from_cash_flow > 0) {
+      flags.push(
+        `expense '${e.name}' drew ${fmtDollars(e.funded_from_account)} from ${e.fund_from} and ` +
+          `${fmtDollars(e.funded_from_cash_flow)} from household cash flow`,
+      );
+    }
+  }
+  return flags;
 }
 
 export interface PlanSummary {
@@ -426,13 +488,52 @@ export class Session {
     return o;
   }
 
+  /** Runs runWithMeta(plan, undefined, undefined, opts) over the resolved scenario overlay.
+   * `opts` is passed straight through — omitted (or `{}`) by every caller except
+   * auditCashFlow, so `detail` stays `undefined` and behavior/output is unchanged for
+   * every pre-existing call site. */
   private runScenario(
     scenario?: string,
-  ): { rows: YearRow[]; assumptions: Assumptions; coastYear: number | null; plan: Plan } {
+    opts?: { detail?: boolean },
+  ): { rows: YearRow[]; assumptions: Assumptions; coastYear: number | null; plan: Plan; detail?: YearDetail[] } {
     const plan = this.requirePlan();
     const overlay = this.resolveOverlay(scenario);
     const modified = applyOverrides(plan, overlay);
-    const { rows, coast_year } = runWithMeta(modified);
-    return { rows, assumptions: modified.assumptions, coastYear: coast_year, plan: modified };
+    const { rows, coast_year, detail } = runWithMeta(modified, undefined, undefined, opts);
+    return { rows, assumptions: modified.assumptions, coastYear: coast_year, plan: modified, detail };
+  }
+
+  /** The per-year cash-flow audit table: identity (surplus) plus two flag
+   * classes (duplicate line names, fund_from shortfalls) built over
+   * runWithMeta's opt-in YearDetail. `fromYear`/`toYear` are an inclusive
+   * range over row.year; omitting either (or both) leaves that bound open —
+   * omitting both returns the full projection horizon. Default windowing
+   * for a small context payload (first 10 years + retirement transition) is
+   * an MCP-layer concern (mcp/server.ts), not this method's — same split as
+   * thin.ts's row thinning. */
+  auditCashFlow(scenario?: string, fromYear?: number, toYear?: number): CashFlowAuditYear[] {
+    const { rows, detail } = this.runScenario(scenario, { detail: true });
+    const out: CashFlowAuditYear[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!;
+      if (fromYear !== undefined && row.year < fromYear) continue;
+      if (toYear !== undefined && row.year > toYear) continue;
+      const yd = detail![i]!;
+      const flags = [
+        ...duplicateNameFlags(yd.incomes, "income"),
+        ...duplicateNameFlags(yd.expenses, "expense"),
+        ...fundFromShortfallFlags(yd.expenses),
+      ];
+      out.push({
+        year: row.year,
+        income: row.income,
+        taxes: row.taxes,
+        expenses: row.expenses,
+        contributions: row.contributions,
+        surplus: row.income - row.taxes - row.expenses - row.contributions,
+        flags,
+      });
+    }
+    return out;
   }
 }

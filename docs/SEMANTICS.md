@@ -119,6 +119,71 @@ actually `available`. Raising or lowering a plan's income amount changes
 what these rungs and matches are worth without needing to edit the rungs
 themselves.
 
+## Income is always gross
+
+`Income.amount` is always **GROSS** (pre-tax) annual dollars — there is no
+`Income.net` field, and the engine performs no in-engine gross-up. Every
+income line stored in a plan is taken at face value as taxable gross income
+by the Tax model below; the engine never asks whether a figure is
+"take-home" or applies any conversion on a plan's behalf.
+
+An in-engine gross-up (`Income.net`, converting a take-home figure inside
+the tax convergence loop) was built and then reverted mid-release — with a
+net-declared income the pretax term cancels out of the tax base, so each
+dollar of pretax contribution added exactly a dollar of available cash,
+turning the tax/pretax convergence into a slope-1 march that under-funded
+capped rungs (they settled at min(want, 4 × (net − expenses))). The product
+call landed on keeping the engine's tax model simple: **one meaning for
+`amount`, always.** Converting
+take-home pay to gross is instead a **propose-only calculator**, entirely
+outside the engine:
+
+```
+income_gross_from_net { net_annual, deferrals_annual?, income_tax?, local_tax?, stated_gross? }
+gross = net_annual / (1 - (income_tax + local_tax)) + deferrals_annual
+```
+
+`income_tax`/`local_tax` default to the loaded plan's `assumptions` when
+omitted (an error if neither is loaded nor supplied, since the closed form
+needs a rate from somewhere). The **`ordRate >= 1` guard**: `income_tax +
+local_tax >= 1` throws rather than dividing by zero or going negative — a
+combined rate at or above 100% has no finite gross that produces the given
+take-home. Passing `stated_gross` reconciles a self-reported figure against
+the computed one; `reconciliation.agrees` is true when
+`|computed - stated| <= 0.01 x stated` (within 1%). The tool never touches
+the loaded plan or any running projection — it only returns numbers for the
+caller to read back and confirm before they go into `create_plan` or
+`update_plan`.
+
+This closed form assumes a SINGLE flat ordinary rate applied to the whole
+net figure — its one real limitation is a **mixed-income household**: a
+`net_annual` that blends wages taxed at the plan's ordinary rate with
+income taxed differently (capital gains, tax-exempt interest, an
+already-annualized bonus at a different withholding rate) will over- or
+under-gross that blended portion, since the formula has no way to see the
+composition of the net figure it's handed. The onboarding flow (`onboard`
+MCP prompt) works around this by settling gross-vs-take-home **per income
+stream**, not once for a household total — it walks each reported figure
+through: establish take-home vs. gross, annualize a period figure (a
+monthly deposit x12), collect ALL pretax deferrals for that stream (401(k),
+HSA, insurance premiums — none of which can be inferred from a deposit
+amount alone), call `income_gross_from_net`, and read the full chain back
+to the user for explicit confirmation — all before the figure goes into
+`create_plan`/`update_plan`.
+
+**Derived effects.** Because `Contribution.pct_of_income` and
+`employer_match_pct` are both relative to actual gross income (Income-
+relative bases above), and pretax rungs reduce the taxable base pretax
+rungs are computed against (Tax model below), getting gross right at
+intake isn't cosmetic: a plan seeded from a take-home figure without
+running it through `income_gross_from_net` first understates gross income,
+which understates every income-relative contribution/match base AND
+understates the ordinary tax bill computed against it — a self-consistent
+but wrong picture, since a smaller taxable base costs less tax on paper.
+`create_plan`/`update_plan`'s tool descriptions carry this same warning
+inline; `seed_from_ynab`'s description flags its own output as take-home
+for the same reason.
+
 ## Tax model
 
 `income_tax`, `local_tax`, and `cap_gains_tax` are flat effective rates —
@@ -467,6 +532,128 @@ leaves a non-kept rung's amount at 0.25x). Resolution order:
 ## Monte Carlo
 
 `ret`/`inflation` scenario overrides are ignored under Monte Carlo (`Session.monteCarlo`, the `mc` CLI command, and the `monte_carlo` MCP tool) — per-year rates come from the sampled block-bootstrap market history instead; `retirement_year`, savings, social-security, and extra income/expense overrides all still apply.
+
+## Metric versioning
+
+`METRICS_VERSION` (`packages/cove-fi/src/metrics.ts`, currently `"1"`) is a
+single version string covering the *meaning* of every derived metric the
+engine reports — `fi_year`, `coast_year`, `depletion_year`,
+`terminal_net_worth`, `earmarked_net_worth`, `terminal_earmarked_net_worth`
+— independent of the package's own semver. `METRIC_DEFINITIONS` in the same
+file is the single source of truth for what each metric means, in prose,
+separate from the projection code that computes it (`engine.ts`/
+`session.ts`), so a caller can read (and version-check) a definition
+without importing the projection machinery. `fi_status` and
+`run_projection` responses both carry the current `metrics_version`
+alongside their numbers.
+
+**The bump obligation.** `METRICS_VERSION` MUST be incremented whenever a
+metric's *meaning* changes in a way that would silently change what a
+previously-fetched number means for the same plan — the 0.4.0 change to
+`coast_year` (trailing-spend heuristic -> true CoastFIRE expectations test;
+see FI and Coast definitions above) is exactly this class of change: same
+field name, same shape, different question being answered. A caller that
+cached a `metrics_version` alongside a metric value can detect drift by
+re-checking the version rather than by noticing numbers moved and guessing
+why. Bug fixes to a metric's *computation* that don't change its
+*definition* (e.g. a rounding fix) do not require a bump — the test is
+whether the prose in `METRIC_DEFINITIONS` would need to change, not whether
+any number did.
+
+`get_engine_info` (no plan required — callable as the very first thing in a
+new session) reports `version` (the package's own semver),
+`metrics_version`, the live `scenario_override_keys`
+(`SCENARIO_OVERRIDE_KEYS`, mirroring the Scenario overrides section above),
+`metric_definitions`, and `capabilities` — every registered MCP tool name.
+`capabilities` is derived, not hand-maintained: every tool registers
+through a shared wrapper that appends its name to a list scoped per
+`createServer()` call (not module-level), ensuring repeated server instances
+in tests don't accumulate stale names, so this field cannot drift from what
+the server actually exposes. Call it to
+detect a stale or partial deploy before trusting any other tool's numbers,
+and to check `metrics_version` whenever a cached metric value needs
+revalidating against its current definition.
+
+## Cash-flow audit
+
+As of 0.6.0, `runWithMeta(plan, overrides?, rates?, { detail: true })` can
+optionally return `RunResult.detail: YearDetail[]` — a per-year breakdown
+of incomes, expenses, contributions, withdrawals, and a 4-bucket tax split
+underlying that year's `YearRow` totals. It is **strictly opt-in**: every
+allocation is guarded by the `detail` flag, `run()` and `YearRow` are
+completely untouched by its existence, and rows are byte-identical whether
+or not `detail` is requested — this is purely additive instrumentation, not
+a new code path through the projection itself.
+
+**The reconciliation is the point.** Unlike `YearRow`'s totals, each of
+`YearDetail`'s four arrays sums EXACTLY (bit-for-bit, not approximately) to
+its corresponding row total:
+
+```
+sum(detail.incomes[].amount)       === row.income
+sum(detail.expenses[].amount)      === row.expenses
+sum(detail.contributions[].amount) === row.contributions
+```
+
+reconstructed via synthetic lines for the household costs the engine folds
+into a row total without a dedicated `plan.expenses`/`plan.incomes` entry:
+`"House (property tax, insurance, maintenance, HOA)"`, `"Mortgage (P&I)"`,
+and `"Discretionary (unallocated surplus)"` on the expense side (the
+`cashFlowDefault: "spend"` plug — see The contribution waterfall above —
+made visible as a line item), and a `"Social Security"` line (all claimants
+aggregated) on the income side. Zero-amount entries are omitted from all
+four arrays — noise for a human-readable audit, not a reconciliation
+requirement, since omitting a term whose value is exactly 0 never changes a
+sum. Taxes reconcile the same way across four buckets:
+`{ ordinary, capital_gains, cash_interest, social_security }` — rate
+buckets, not source buckets: a `trad`-withdrawal gross-up tax and RMD tax
+both fold into `ordinary` alongside working-years ordinary income tax, and
+a taxable-account withdrawal's gains tax folds into `capital_gains`
+alongside dividend tax, since both are taxed at `cap_gains_tax`.
+
+**`fund_from` expenses split, not double-count.** For a non-`fund_from`
+expense line, `detail.expenses[].amount` is the full plan amount and
+`funded_from_cash_flow === amount`. For a `fund_from` (529-style) line, the
+account-covered portion never touched `row.expenses` in the first place
+(see The contribution waterfall / 529-funded education), so `amount` here
+is ONLY the shortfall that fell through to household cash flow —
+`funded_from_account` reports how much of *this* expense the account
+covered, for context, but is informational and does NOT sum into `amount`
+(that would double-count money that never hit cash flow — the exact defect
+the audit tool exists to catch). The account draw itself shows up
+separately, in `detail.withdrawals`, for that same account/year. A
+fully-covered `fund_from` expense therefore contributes 0 and is omitted
+from `detail.expenses` entirely, even though the draw is visible in
+`detail.withdrawals`.
+
+**`audit_cash_flow { scenario?, from_year?, to_year? }`** (MCP) turns this
+substrate into a per-year table over the base plan or a named scenario:
+`income`, `taxes`, `expenses`, `contributions`, `surplus` (`income - taxes
+- expenses - contributions`, ~0 in working years under the engine's
+surplus-spend default — a nonzero surplus in a retirement year isn't a bug
+signal, it's just what account drawdown instead of spending looks like),
+and `flags`. Omitting both `from_year`/`to_year` returns a context-sized
+default window: the first 10 projection years plus
+`retirement_year - 1 .. retirement_year + 2` (deduped, sorted) — pass an
+explicit range to see other years.
+
+Two flag classes, both computed purely from that year's `YearDetail`:
+
+1. **Duplicate line name** — an income or expense NAME appearing more than
+   once within a single year (`"duplicate income line 'bonus' appears
+   2x"`). Synthetic engine lines are included in the check (they're always
+   single-instance by construction and can't false-positive on their own,
+   but a user's own expense colliding with a synthetic name, e.g.
+   `"Mortgage (P&I)"`, is a real collision worth flagging).
+2. **`fund_from` funding shortfall** — a `fund_from` expense whose account
+   didn't fully cover the amount that year, naming both the amount drawn
+   from the account and the amount that fell through to household cash
+   flow (`"expense 'college' drew 12,000 from 529 and 3,000 from household
+   cash flow"`).
+
+A clean plan (no duplicate names, no `fund_from` shortfalls) returns an
+empty `flags` array for every year — the audit is silent by default, not
+noisy.
 
 ## Reserved fields (accepted, not yet wired)
 
